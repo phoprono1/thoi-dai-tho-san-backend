@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: thoi-dai-tho-san-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3005
+      # Add these environment variables in Render dashboard:
+      # DATABASE_HOST
+      # DATABASE_PORT
+      # DATABASE_USERNAME  
+      # DATABASE_PASSWORD
+      # DATABASE_NAME
+      # JWT_SECRET
+      # FRONTEND_URL
