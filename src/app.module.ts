@@ -33,13 +33,24 @@ import { MonsterModule } from './monsters/monster.module';
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      username: process.env.DB_USERNAME || 'postgres',
-      password: process.env.DB_PASSWORD || 'password',
-      database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
+      ...(process.env.DATABASE_URL
+        ? {
+            url: process.env.DATABASE_URL,
+            ssl:
+              process.env.NODE_ENV === 'production'
+                ? { rejectUnauthorized: false }
+                : false,
+          }
+        : {
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT || '5432'),
+            username: process.env.DB_USERNAME || 'postgres',
+            password: process.env.DB_PASSWORD || 'password',
+            database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
+          }),
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: true, // Set to false in production
+      synchronize: process.env.NODE_ENV === 'development', // Only sync in development
+      logging: process.env.NODE_ENV === 'development',
     }),
     ClassesModule,
     AuthModule,
