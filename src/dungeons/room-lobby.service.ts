@@ -354,6 +354,14 @@ export class RoomLobbyService {
       .leftJoinAndSelect('players.player', 'player')
       .where('room.isPrivate = :isPrivate', { isPrivate: false });
 
+    // By default, exclude cancelled rooms from the public room list.
+    // If an explicit status filter is provided, respect it.
+    if (!status) {
+      query.andWhere('room.status != :cancelled', {
+        cancelled: RoomStatus.CANCELLED,
+      });
+    }
+
     if (dungeonId) {
       query.andWhere('room.dungeonId = :dungeonId', { dungeonId });
     }

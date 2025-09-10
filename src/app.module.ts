@@ -50,7 +50,8 @@ import { MonsterModule } from './monsters/monster.module';
           }),
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: process.env.NODE_ENV === 'development', // Only sync in development
-      logging: process.env.NODE_ENV === 'development',
+      // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
+      logging: process.env.TYPEORM_LOGGING === 'true',
     }),
     ClassesModule,
     AuthModule,

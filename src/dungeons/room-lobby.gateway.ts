@@ -61,8 +61,67 @@ export class RoomLobbyGateway
     this.logger.log(`Room client connected: ${client.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     this.logger.log(`Room client disconnected: ${client.id}`);
+
+    try {
+      const data = client.data as any;
+      const userId: number | undefined = data?.userId;
+      const roomId: number | undefined = data?.roomId;
+
+      if (!userId || !roomId) return;
+
+      // Check whether other sockets for this same user in the same room remain connected.
+      const roomClients =
+        this.server?.sockets?.adapter?.rooms?.get(`room_${roomId}`) ||
+        new Set();
+
+      let hostStillConnected = false;
+      for (const socketId of roomClients) {
+        const socket = this.server?.sockets?.sockets?.get(socketId);
+        if (!socket) continue;
+        const sData = (socket.data as any) || {};
+        // If there is another socket for the same user in this room, host is still connected
+        if (sData.userId === userId && socket.id !== client.id) {
+          hostStillConnected = true;
+          break;
+        }
+      }
+
+      if (!hostStillConnected) {
+        // Best-effort: if the disconnected user was the host of the room, cancel it so it won't remain active
+        try {
+          // Use getRoomInfo to verify host id and existence
+          const roomInfo = await this.roomLobbyService.getRoomInfo(roomId);
+          if (roomInfo && roomInfo.host && roomInfo.host.id === userId) {
+            this.logger.log(
+              `Host ${userId} disconnected from room ${roomId} — cancelling room`,
+            );
+            await this.roomLobbyService
+              .cancelRoom(roomId, userId)
+              .catch(() => {});
+
+            // Notify any remaining clients in the room that it's closed/cancelled
+            try {
+              this.server.to(`room_${roomId}`).emit('roomClosed', {
+                message: 'Host disconnected, room cancelled',
+              });
+            } catch (e) {
+              // ignore emit errors
+            }
+          }
+        } catch (err) {
+          // ignore verification errors — this is best-effort cleanup
+          this.logger.warn(
+            `Error while verifying/cancelling room ${roomId} for host ${userId}: ${err?.message || err}`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error(
+        `Error in handleDisconnect cleanup: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   @SubscribeMessage('joinRoom')

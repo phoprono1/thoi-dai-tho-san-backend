@@ -15,6 +15,7 @@ import { LevelsModule } from '../levels/levels.module';
 import { UserStaminaModule } from '../user-stamina/user-stamina.module';
 import { Monster } from '../monsters/monster.entity';
 import { MonstersModule } from '../monsters/monsters.module';
+import { ItemsModule } from '../items/items.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { MonstersModule } from '../monsters/monsters.module';
     LevelsModule,
     UserStaminaModule,
     MonstersModule,
+    ItemsModule,
   ],
   providers: [CombatResultsService],
   controllers: [CombatResultsController],

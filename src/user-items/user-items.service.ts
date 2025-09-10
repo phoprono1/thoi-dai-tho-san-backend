@@ -322,18 +322,85 @@ export class UserItemsService {
 
     // Nếu equip = true, unequip tất cả items cùng loại trước
     if (equip) {
-      await this.userItemsRepository.update(
-        {
-          userId: userItem.userId,
-          item: { type: userItem.item.type },
-          isEquipped: true,
-        },
-        { isEquipped: false },
+      // Cannot use relation objects in Repository.update criteria because
+      // UpdateQueryBuilder can't resolve relation aliases (error seen in logs).
+      // Instead, find currently equipped items for the user, filter by item.type
+      // and save the updated entities.
+      const currentlyEquipped = await this.userItemsRepository.find({
+        where: { userId: userItem.userId, isEquipped: true },
+        relations: ['item'],
+      });
+
+      const toUnequip = currentlyEquipped.filter(
+        (ui) => ui.item && ui.item.type === userItem.item.type,
       );
+      if (toUnequip.length > 0) {
+        toUnequip.forEach((ui) => (ui.isEquipped = false));
+        await this.userItemsRepository.save(toUnequip);
+      }
     }
 
     userItem.isEquipped = equip;
-    return this.userItemsRepository.save(userItem);
+    const saved = await this.userItemsRepository.save(userItem);
+
+    // Recalculate and persist derived stats (class-derived + equipped item bonuses)
+    try {
+      const userStats = await this.userStatsService.findByUserId(
+        userItem.userId,
+      );
+      if (userStats) {
+        // Aggregate equipped items for this user
+        const equipped = await this.getEquippedItems(userItem.userId);
+
+        let itemsAttack = 0;
+        let itemsDefense = 0;
+        let itemsHp = 0;
+
+        equipped.forEach((ui) => {
+          const it = ui.item;
+          const its = (it?.stats || {}) as Record<string, unknown>;
+          const up = (ui.upgradeStats || {}) as Record<string, unknown>;
+
+          const atkVal = Number(its['attack'] || 0);
+          const defVal = Number(its['defense'] || 0);
+          const hpVal = Number(its['hp'] || its['maxHp'] || 0);
+
+          itemsAttack += atkVal;
+          itemsDefense += defVal;
+          itemsHp += hpVal;
+
+          // upgrade stats
+          itemsAttack += Number(up['attack'] || 0);
+          itemsDefense += Number(up['defense'] || 0);
+          itemsHp += Number(up['hp'] || up['maxHp'] || 0);
+        });
+
+        // Compute base derived from class-related stats (strength/vitality)
+        const classStrength = userStats.strength || 0;
+        const classVitality = userStats.vitality || 0;
+
+        const baseAttackFromClass = Math.floor(classStrength * 2);
+        const baseDefenseFromClass = Math.floor(classVitality * 1.5);
+        const baseMaxHpFromClass = Math.floor(classVitality * 10);
+
+        const newAttack = baseAttackFromClass + itemsAttack;
+        const newDefense = baseDefenseFromClass + itemsDefense;
+        const newMaxHp = baseMaxHpFromClass + itemsHp;
+
+        // Persist updated derived stats; set currentHp to new max for consistency with recalc behavior
+        await this.userStatsService.update(userStats.id, {
+          attack: newAttack,
+          defense: newDefense,
+          maxHp: newMaxHp,
+          currentHp: newMaxHp,
+        });
+      }
+    } catch (err) {
+      // non-fatal: log and continue (do not block equip)
+      console.error('Error recalculating stats after equip:', err);
+    }
+
+    return saved;
   }
 
   async getEquippedItems(userId: number) {
@@ -446,18 +513,20 @@ export class UserItemsService {
     };
   }
 
-  private async useMpPotion(
-    userItem: UserItem,
-    user: User,
+  private useMpPotion(
+    _userItem: UserItem,
+    _user: User,
   ): Promise<{ success: boolean; message: string; effects: any }> {
     // MP system chưa được implement, tạm thời return success
-    return {
+    void _userItem;
+    void _user;
+    return Promise.resolve({
       success: true,
       message: 'Tính năng MP potion sẽ được cập nhật sau',
       effects: {
         mpRestored: 0,
       },
-    };
+    });
   }
 
   private async useExpPotion(
@@ -466,8 +535,6 @@ export class UserItemsService {
   ): Promise<{ success: boolean; message: string; effects: any }> {
     const expGain = userItem.item.consumableValue || 100; // Default 100 EXP if not specified
     const oldLevel = user.level;
-    const oldExperience = user.experience;
-
     user.experience += expGain;
     await this.usersRepository.save(user);
 
@@ -484,7 +551,7 @@ export class UserItemsService {
         leveledUp = true;
         newLevel = updatedUser.level;
       }
-    } catch (error) {
+    } catch {
       // Nếu không đủ exp để level up, không sao
     }
 
@@ -512,29 +579,37 @@ export class UserItemsService {
       );
     }
 
-    const itemStats = userItem.item.stats;
-    const statBoosts: any = {};
+    const itemStats = userItem.item.stats || {};
+    const statBoosts: Record<string, number> = {};
 
-    // Áp dụng các stat boosts
-    if (itemStats?.strength) {
-      userStats.strength += itemStats.strength;
-      statBoosts.strength = itemStats.strength;
+    const sStrength = Number(itemStats['strength']);
+    if (!Number.isNaN(sStrength)) {
+      userStats.strength += sStrength;
+      statBoosts.strength = sStrength;
     }
-    if (itemStats?.intelligence) {
-      userStats.intelligence += itemStats.intelligence;
-      statBoosts.intelligence = itemStats.intelligence;
+
+    const sIntelligence = Number(itemStats['intelligence']);
+    if (!Number.isNaN(sIntelligence)) {
+      userStats.intelligence += sIntelligence;
+      statBoosts.intelligence = sIntelligence;
     }
-    if (itemStats?.dexterity) {
-      userStats.dexterity += itemStats.dexterity;
-      statBoosts.dexterity = itemStats.dexterity;
+
+    const sDexterity = Number(itemStats['dexterity']);
+    if (!Number.isNaN(sDexterity)) {
+      userStats.dexterity += sDexterity;
+      statBoosts.dexterity = sDexterity;
     }
-    if (itemStats?.vitality) {
-      userStats.vitality += itemStats.vitality;
-      statBoosts.vitality = itemStats.vitality;
+
+    const sVitality = Number(itemStats['vitality']);
+    if (!Number.isNaN(sVitality)) {
+      userStats.vitality += sVitality;
+      statBoosts.vitality = sVitality;
     }
-    if (itemStats?.luck) {
-      userStats.luck += itemStats.luck;
-      statBoosts.luck = itemStats.luck;
+
+    const sLuck = Number(itemStats['luck']);
+    if (!Number.isNaN(sLuck)) {
+      userStats.luck += sLuck;
+      statBoosts.luck = sLuck;
     }
 
     // Recalculate total stats

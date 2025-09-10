@@ -13,6 +13,7 @@ import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
 import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { Monster } from '../monsters/monster.entity';
+import { ItemsService } from '../items/items.service';
 
 @Injectable()
 export class CombatResultsService {
@@ -33,6 +34,7 @@ export class CombatResultsService {
     private levelsService: LevelsService,
     private userStaminaService: UserStaminaService,
     private userStatsService: UserStatsService,
+    private itemsService: ItemsService,
   ) {}
 
   async startCombat(userIds: number[], dungeonId: number) {
@@ -75,6 +77,25 @@ export class CombatResultsService {
     // Tiêu thụ stamina
     for (const user of users) {
       await this.userStaminaService.consumeStamina(user.id, staminaCost);
+    }
+
+    // Ensure we have the freshest UserStat records in case they were updated
+    // recently (e.g., equip endpoint updated derived stats). Re-fetch stats
+    // for each user to avoid using stale relations from earlier load.
+    for (const user of users) {
+      try {
+        const freshStats = await this.userStatsRepository.findOne({
+          where: { userId: user.id },
+        });
+        if (freshStats) {
+          user.stats = freshStats;
+        }
+      } catch (err) {
+        console.warn(
+          `Could not refresh stats for user ${user.id}:`,
+          err?.message || err,
+        );
+      }
     }
 
     // Thực hiện combat logic
@@ -200,6 +221,7 @@ export class CombatResultsService {
               element: monster.element,
               experienceReward: monster.experienceReward,
               goldReward: monster.goldReward,
+              dropItems: monster.dropItems || [],
             });
           }
         }
@@ -219,6 +241,7 @@ export class CombatResultsService {
         element: 'dark',
         experienceReward: 10,
         goldReward: 5,
+        dropItems: [],
       });
     }
 
@@ -294,8 +317,8 @@ export class CombatResultsService {
     const aliveEnemiesCount = enemies.filter((e) => e.hp > 0).length;
     const result = aliveEnemiesCount === 0 ? 'victory' : 'defeat';
 
-    // Calculate rewards
-    const rewards = this.calculateRewards(dungeon, result);
+    // Calculate rewards based on which enemies were defeated
+    const rewards = await this.calculateRewards(enemies, dungeon, result);
 
     // Calculate final team stats
     const finalTeamStats = {
@@ -327,6 +350,101 @@ export class CombatResultsService {
       teamStats: finalTeamStats,
       enemies: finalEnemies, // Use updated enemies info with current HP
     };
+  }
+
+  // Calculate rewards per enemy killed. Supports monster-level drop definitions
+  private async calculateRewards(
+    enemies: any[],
+    dungeon: Dungeon,
+    result: string,
+  ) {
+    const rewards: {
+      experience: number;
+      gold: number;
+      items: Array<{ itemId: number; quantity: number; name?: string }>;
+    } = {
+      experience: 0,
+      gold: 0,
+      items: [],
+    };
+
+    if (result === 'victory') {
+      for (const enemy of enemies) {
+        // Count rewards only for defeated enemies (hp <= 0)
+        if (!enemy) continue;
+        const defeated = typeof enemy.hp === 'number' ? enemy.hp <= 0 : false;
+        if (!defeated) continue;
+
+        // Add experience and gold from the enemy (fallback to dungeon-based values)
+        const exp = Number(
+          enemy.experienceReward ?? dungeon.levelRequirement * 10,
+        );
+        const gold = Number(enemy.goldReward ?? dungeon.levelRequirement * 5);
+        rewards.experience += exp;
+        rewards.gold += gold;
+
+        // Process drop table for this enemy (monster.dropItems preferred, fallback to dungeon.dropItems)
+        const drops = enemy.dropItems || dungeon.dropItems || [];
+        for (const drop of drops) {
+          const dropRate = Number(drop.dropRate ?? 0);
+          if (Math.random() < dropRate) {
+            let quantity = 1;
+            if (
+              drop.minQuantity !== undefined &&
+              drop.maxQuantity !== undefined
+            ) {
+              const minQ = Number(drop.minQuantity);
+              const maxQ = Number(drop.maxQuantity);
+              quantity = Math.floor(Math.random() * (maxQ - minQ + 1)) + minQ;
+            } else if (drop.quantity !== undefined) {
+              quantity = Number(drop.quantity) || 1;
+            } else {
+              quantity = Math.floor(Math.random() * 3) + 1; // default 1-3
+            }
+
+            const itemIdNum = Number(drop.itemId);
+            const existing = rewards.items.find(
+              (it) => it.itemId === itemIdNum,
+            );
+            if (existing) existing.quantity += quantity;
+            else
+              rewards.items.push({
+                itemId: itemIdNum,
+                quantity,
+                name: undefined,
+              });
+          }
+        }
+      }
+    } else {
+      // Non-victory: give small consolation based on number of enemies and dungeon
+      for (const enemy of enemies) {
+        if (!enemy) continue;
+        const exp = Math.floor(
+          (Number(enemy.experienceReward ?? dungeon.levelRequirement * 2) ||
+            0) * 0.2,
+        );
+        const gold = Math.floor(
+          (Number(enemy.goldReward ?? dungeon.levelRequirement * 1) || 0) * 0.2,
+        );
+        rewards.experience += exp;
+        rewards.gold += gold;
+      }
+    }
+
+    // Enrich item rewards with item names (if ItemsService available)
+    if (rewards.items.length > 0 && this.itemsService) {
+      for (const it of rewards.items) {
+        try {
+          const item = await this.itemsService.findOne(it.itemId);
+          if (item) it.name = item.name;
+        } catch {
+          // ignore - keep id only
+        }
+      }
+    }
+
+    return rewards;
   }
 
   private getActiveEffects(stats: any): string[] {
@@ -397,34 +515,6 @@ export class CombatResultsService {
     });
 
     return { damage };
-  }
-
-  private calculateRewards(dungeon: Dungeon, result: string) {
-    if (result === 'victory') {
-      const items: Array<{ itemId: number; quantity: number }> = [];
-
-      // Use dungeon's drop items if available
-      if (dungeon.dropItems && dungeon.dropItems.length > 0) {
-        for (const dropItem of dungeon.dropItems) {
-          if (Math.random() < dropItem.dropRate) {
-            const quantity = Math.floor(Math.random() * 3) + 1; // 1-3 items
-            items.push({ itemId: dropItem.itemId, quantity });
-          }
-        }
-      }
-      // No fallback - only give items that are properly defined
-
-      return {
-        experience: dungeon.levelRequirement * 10,
-        gold: dungeon.levelRequirement * 5,
-        items,
-      };
-    }
-    return {
-      experience: Math.floor(dungeon.levelRequirement * 2),
-      gold: Math.floor(dungeon.levelRequirement * 1),
-      items: [],
-    };
   }
 
   private async applyRewards(user: User, rewards: any) {
