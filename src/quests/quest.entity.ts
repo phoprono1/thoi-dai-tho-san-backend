@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 
 export enum QuestType {
@@ -101,6 +102,7 @@ export class Quest {
 }
 
 @Entity('user_quests')
+@Index(['userId', 'status'])
 export class UserQuest {
   @PrimaryGeneratedColumn()
   id: number;
@@ -120,6 +122,7 @@ export class UserQuest {
     enum: QuestStatus,
     default: QuestStatus.AVAILABLE,
   })
+  @Index()
   status: QuestStatus;
 
   @Column('json', { nullable: true })
@@ -144,9 +147,11 @@ export class UserQuest {
   };
 
   @Column({ type: 'timestamp', nullable: true })
+  @Index()
   completedAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
+  @Index()
   startedAt: Date;
 
   @Column({ type: 'date', nullable: true })

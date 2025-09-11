@@ -116,8 +116,8 @@ export class CombatResultsService {
       })),
     };
 
-    // Lưu kết quả
-    await this.combatResultsRepository.save({
+    // Lưu kết quả and capture saved entity (so we have the generated id)
+    const savedCombat = await this.combatResultsRepository.save({
       userIds,
       dungeonId,
       result: combatResult.result as CombatResultType,
@@ -137,6 +137,9 @@ export class CombatResultsService {
     }
 
     const finalResult = {
+      // include persisted id for clients to reference
+      id: (savedCombat as any)?.id,
+      combatResultId: (savedCombat as any)?.id,
       result: combatResult.result,
       duration,
       rewards: combatResult.rewards,

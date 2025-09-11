@@ -61,11 +61,12 @@ export class QuestController {
     @Request() req,
     @Param('id', ParseIntPipe) questId: number,
   ) {
-    const isCompleted = await this.questService.checkQuestCompletion(
+    // Return authoritative updated objects so frontend can update UI immediately
+    const result = await this.questService.checkQuestCompletionForApi(
       req.user.id,
       questId,
     );
-    return { completed: isCompleted };
+    return result;
   }
 
   @UseGuards(JwtAuthGuard)

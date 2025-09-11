@@ -320,6 +320,13 @@ export class UserItemsService {
       throw new BadRequestException('Vật phẩm không tồn tại');
     }
 
+    // Fetch current user stats and equipped items BEFORE making changes so we can
+    // preserve level-based contributions when recalculating derived stats.
+    const userStatsBefore = await this.userStatsService.findByUserId(
+      userItem.userId,
+    );
+    const equippedBefore = await this.getEquippedItems(userItem.userId);
+
     // Nếu equip = true, unequip tất cả items cùng loại trước
     if (equip) {
       // Cannot use relation objects in Repository.update criteria because
@@ -340,39 +347,48 @@ export class UserItemsService {
       }
     }
 
+    // Apply equip/unequip and persist
     userItem.isEquipped = equip;
     const saved = await this.userItemsRepository.save(userItem);
 
-    // Recalculate and persist derived stats (class-derived + equipped item bonuses)
+    // Recalculate and persist derived stats while preserving level-up contributions.
     try {
-      const userStats = await this.userStatsService.findByUserId(
-        userItem.userId,
-      );
+      const userStats = userStatsBefore; // already fetched prior to changes
       if (userStats) {
-        // Aggregate equipped items for this user
-        const equipped = await this.getEquippedItems(userItem.userId);
-
-        let itemsAttack = 0;
-        let itemsDefense = 0;
-        let itemsHp = 0;
-
-        equipped.forEach((ui) => {
+        // Sum item stats before the change (used to compute level-only contribution)
+        let prevItemsAttack = 0;
+        let prevItemsDefense = 0;
+        let prevItemsHp = 0;
+        equippedBefore.forEach((ui) => {
           const it = ui.item;
           const its = (it?.stats || {}) as Record<string, unknown>;
           const up = (ui.upgradeStats || {}) as Record<string, unknown>;
 
-          const atkVal = Number(its['attack'] || 0);
-          const defVal = Number(its['defense'] || 0);
-          const hpVal = Number(its['hp'] || its['maxHp'] || 0);
+          prevItemsAttack +=
+            Number(its['attack'] || 0) + Number(up['attack'] || 0);
+          prevItemsDefense +=
+            Number(its['defense'] || 0) + Number(up['defense'] || 0);
+          prevItemsHp +=
+            Number(its['hp'] || its['maxHp'] || 0) +
+            Number(up['hp'] || up['maxHp'] || 0);
+        });
 
-          itemsAttack += atkVal;
-          itemsDefense += defVal;
-          itemsHp += hpVal;
+        // Aggregate equipped items for this user AFTER the save (current equipment)
+        const equippedAfter = await this.getEquippedItems(userItem.userId);
+        let itemsAttack = 0;
+        let itemsDefense = 0;
+        let itemsHp = 0;
+        equippedAfter.forEach((ui) => {
+          const it = ui.item;
+          const its = (it?.stats || {}) as Record<string, unknown>;
+          const up = (ui.upgradeStats || {}) as Record<string, unknown>;
 
-          // upgrade stats
-          itemsAttack += Number(up['attack'] || 0);
-          itemsDefense += Number(up['defense'] || 0);
-          itemsHp += Number(up['hp'] || up['maxHp'] || 0);
+          itemsAttack += Number(its['attack'] || 0) + Number(up['attack'] || 0);
+          itemsDefense +=
+            Number(its['defense'] || 0) + Number(up['defense'] || 0);
+          itemsHp +=
+            Number(its['hp'] || its['maxHp'] || 0) +
+            Number(up['hp'] || up['maxHp'] || 0);
         });
 
         // Compute base derived from class-related stats (strength/vitality)
@@ -383,9 +399,25 @@ export class UserItemsService {
         const baseDefenseFromClass = Math.floor(classVitality * 1.5);
         const baseMaxHpFromClass = Math.floor(classVitality * 10);
 
-        const newAttack = baseAttackFromClass + itemsAttack;
-        const newDefense = baseDefenseFromClass + itemsDefense;
-        const newMaxHp = baseMaxHpFromClass + itemsHp;
+        // Derive level-only contributions by subtracting base and previous item bonuses from stored stats
+        const levelOnlyAttack = Math.max(
+          0,
+          (userStats.attack || 0) - baseAttackFromClass - prevItemsAttack,
+        );
+        const levelOnlyDefense = Math.max(
+          0,
+          (userStats.defense || 0) - baseDefenseFromClass - prevItemsDefense,
+        );
+        const levelOnlyMaxHp = Math.max(
+          0,
+          (userStats.maxHp || 0) - baseMaxHpFromClass - prevItemsHp,
+        );
+
+        // New totals = base from class + level-only contributions + current item bonuses
+        const newAttack = baseAttackFromClass + levelOnlyAttack + itemsAttack;
+        const newDefense =
+          baseDefenseFromClass + levelOnlyDefense + itemsDefense;
+        const newMaxHp = baseMaxHpFromClass + levelOnlyMaxHp + itemsHp;
 
         // Persist updated derived stats; set currentHp to new max for consistency with recalc behavior
         await this.userStatsService.update(userStats.id, {
