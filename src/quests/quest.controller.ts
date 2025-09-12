@@ -84,6 +84,16 @@ export class QuestController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/claim')
+  async claimQuestReward(
+    @Request() req,
+    @Param('id', ParseIntPipe) userQuestId: number,
+  ) {
+    // userQuestId is the id of the UserQuest row
+    return this.questService.claimQuestReward(req.user.id, userQuestId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('user/available')
   async getAvailableQuests(@Request() req) {
     return this.questService.getAvailableQuestsForUser(req.user.id);

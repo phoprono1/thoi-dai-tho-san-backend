@@ -24,7 +24,10 @@ import { MailboxModule } from './mailbox/mailbox.module';
 import { CharacterClassesModule } from './character-classes/character-classes.module';
 import { DonorsModule } from './donors/donors.module';
 import { QuestModule } from './quests/quest.module';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
+import { CommonModule } from './common/common.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -53,6 +56,9 @@ import { MonsterModule } from './monsters/monster.module';
       // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
       logging: process.env.TYPEORM_LOGGING === 'true',
     }),
+    ScheduleModule.forRoot(),
+    CommonModule,
+    HealthModule,
     ClassesModule,
     AuthModule,
     UsersModule,

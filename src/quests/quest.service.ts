@@ -54,11 +54,45 @@ export class QuestService {
   }
 
   async getUserQuests(userId: number): Promise<UserQuest[]> {
-    return this.userQuestRepository.find({
+    // Return user quests but omit those that are completed and already
+    // had their rewards claimed. This prevents the API from showing
+    // quests that the client already claimed (they can still reappear
+    // after a full refresh if needed, e.g., daily resets).
+    const all = await this.userQuestRepository.find({
       where: { userId },
       relations: ['quest'],
       order: { createdAt: 'DESC' },
     });
+
+    // Lazy reset: If a daily quest hasn't been reset today, reset it when
+    // the user fetches their quests. This complements the scheduled job and
+    // ensures users who hit the server after a missed cron still get fresh
+    // daily quests.
+    const today = new Date().toDateString();
+    for (const uq of all) {
+      try {
+        if (uq.quest && uq.quest.type === QuestType.DAILY) {
+          if (!uq.lastResetDate || uq.lastResetDate.toDateString() !== today) {
+            // Reset this daily quest for the user
+            await this.resetDailyQuest(userId, uq.quest.id);
+          }
+        }
+      } catch {
+        // Ignore reset failures; continue returning other quests
+      }
+    }
+
+    // Re-fetch after any potential resets so we return authoritative state
+    const refreshed = await this.userQuestRepository.find({
+      where: { userId },
+      relations: ['quest'],
+      order: { createdAt: 'DESC' },
+    });
+
+    return refreshed.filter(
+      (uq) =>
+        !(uq.status === QuestStatus.COMPLETED && uq.rewardsClaimed === true),
+    );
   }
 
   async startQuest(userId: number, questId: number): Promise<UserQuest> {
@@ -323,25 +357,15 @@ export class QuestService {
         }
       }
 
-      // Mark as completed and persist
+      // Mark as completed and persist; do NOT apply rewards here. Rewards
+      // are applied only when the player explicitly claims them to keep the
+      // flow linear: Start -> Check -> Claim. Also mark rewardsClaimed=false
+      // so claim can apply rewards exactly once.
       userQuest.status = QuestStatus.COMPLETED;
       userQuest.completedAt = new Date();
       userQuest.completionCount = (userQuest.completionCount || 0) + 1;
+      (userQuest as any).rewardsClaimed = false;
       await this.userQuestRepository.save(userQuest);
-
-      // Apply rewards to the user (experience, gold, items)
-      try {
-        const q = await this.getQuestById(userQuest.questId);
-        if (q) {
-          await this.applyQuestRewards(userId, q);
-        }
-      } catch (err) {
-        // Do not block completion if reward application fails; log and continue
-        console.error(
-          'Error applying quest rewards:',
-          err instanceof Error ? err.message : err,
-        );
-      }
     }
 
     return allCompleted;
@@ -377,6 +401,77 @@ export class QuestService {
     }
 
     return { completed, userQuest, userItems };
+  }
+
+  /**
+   * Claim rewards for a completed UserQuest. This endpoint is idempotent
+   * from the frontend perspective: rewards are applied during completion
+   * already, so this just returns authoritative user state so the client
+   * can update caches/UI when the player presses "Nhận thưởng".
+   */
+  async claimQuestReward(
+    userId: number,
+    userQuestId: number,
+  ): Promise<{
+    message: string;
+    user?: User | null;
+    userQuest?: UserQuest | null;
+    userItems?: any[];
+  }> {
+    const userQuest = await this.userQuestRepository.findOne({
+      where: { id: userQuestId, userId },
+      relations: ['quest'],
+    });
+    if (!userQuest) {
+      return { message: 'User quest not found' };
+    }
+
+    // Only allow claiming for completed quests
+    if (userQuest.status !== QuestStatus.COMPLETED) {
+      return { message: 'Quest not completed yet', userQuest };
+    }
+
+    // Apply rewards only if they have not been claimed yet. This ensures
+    // the reward flow is: start -> check -> claim and prevents double application.
+    if (!(userQuest as any).rewardsClaimed) {
+      try {
+        const quest = userQuest.quest;
+        if (quest) {
+          await this.applyQuestRewards(userId, quest);
+        }
+
+        // Mark rewards as claimed and persist
+        (userQuest as any).rewardsClaimed = true;
+        await this.userQuestRepository.save(userQuest);
+      } catch (err) {
+        console.error(
+          'Error applying quest rewards during claim:',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    // Fetch authoritative user and inventory so frontend can apply them
+    let user: User | null = null;
+    let userItems: any[] = [];
+    try {
+      user = await this.userRepository.findOne({ where: { id: userId } });
+    } catch {
+      // ignore
+    }
+
+    try {
+      userItems = await this.userItemsService.findByUserId(userId);
+    } catch {
+      // ignore
+    }
+
+    return {
+      message: 'Rewards claimed (or already applied)',
+      user,
+      userQuest,
+      userItems,
+    };
   }
 
   async isQuestCompleted(userId: number, questId: number): Promise<boolean> {

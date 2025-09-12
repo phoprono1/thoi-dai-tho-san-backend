@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-floating-promises */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -12,9 +15,12 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, UseGuards, Logger } from '@nestjs/common';
+import { Injectable, UseGuards, Logger, Inject } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RoomLobbyService } from './room-lobby.service';
+import { REDIS_CLIENT } from '../common/redis.provider';
+import Redis from 'ioredis';
+import { combatQueue } from '../queues/combat.queue';
 
 @WebSocketGateway({
   cors: {
@@ -33,7 +39,96 @@ export class RoomLobbyGateway
   @WebSocketServer() server: Server;
   private logger = new Logger(RoomLobbyGateway.name);
 
-  constructor(private roomLobbyService: RoomLobbyService) {}
+  constructor(
+    private roomLobbyService: RoomLobbyService,
+    @Inject(REDIS_CLIENT) private readonly redisClient?: Redis,
+  ) {
+    // subscribe to combat results published by worker (best-effort, resilient)
+    if (this.redisClient) {
+      (async () => {
+        const sub = this.redisClient.duplicate();
+        sub.on('error', (err) => {
+          this.logger.warn(`Redis subscriber error: ${err?.message || err}`);
+        });
+
+        try {
+          try {
+            // attempt to connect, but ignore "already connecting/connected" errors
+            if (typeof sub.connect === 'function') {
+              if (sub.status !== 'connecting' && sub.status !== 'ready') {
+                // connect may throw if already connecting; catch below
+
+                await sub.connect();
+              }
+            }
+          } catch (innerErr) {
+            const msg = (innerErr as any)?.message || innerErr;
+            if (!/already connecting|already connected/i.test(String(msg))) {
+              this.logger.warn(
+                'Error while connecting redis subscriber: ' + msg,
+              );
+            }
+          }
+
+          // subscribe and listen for messages
+          // ioredis emits 'message' with (channel, message)
+          // we intentionally don't await subscribe result here; handle messages as they arrive
+
+          await sub.subscribe('combat:result');
+          sub.on('message', (_channel: string, message: string) => {
+            this.logger.log('[Redis] combat:result message received');
+            void (async () => {
+              try {
+                const payload = JSON.parse(message as string);
+                const roomId = payload.roomId;
+                const result = payload.result;
+
+                // Debug: Count clients in room before emitting
+                const roomName = `room_${roomId}`;
+                const socketIdSet = await this.server.in(roomName).allSockets();
+                const socketIds = Array.from(socketIdSet || []);
+                const clientsCount = socketIds.length;
+
+                this.logger.log(
+                  `[Emit Debug] Emitting combatResult to ${roomName}, clients count: ${clientsCount}`,
+                );
+                this.logger.log(
+                  `[Emit Debug] Socket IDs: ${socketIds.join(', ')}`,
+                );
+
+                // Debug: Check each socket's data
+                for (const socketId of socketIds) {
+                  const socket = this.server?.sockets?.sockets?.get(socketId);
+                  const socketData = (socket?.data as any) || {};
+                  this.logger.log(
+                    `[Emit Debug] socket ${socketId} data:`,
+                    socketData,
+                  );
+                }
+
+                this.server
+                  .to(`room_${roomId}`)
+                  .emit('combatResult', { roomId, result });
+                this.logger.log(
+                  `[Redis] combatResult emitted to room_${roomId}`,
+                );
+              } catch (e) {
+                this.logger.warn(
+                  'Failed to parse combat result message: ' +
+                    ((e as any)?.message || e),
+                );
+              }
+            })();
+          });
+        } catch (e) {
+          this.logger.warn(
+            'Failed to setup redis subscription for combat:result: ' +
+              ((e as any)?.message || e),
+          );
+        }
+      })();
+    }
+  }
 
   // Fallback in-process combat handling when Redis/Bull is not used.
   // This keeps API compatibility for tests: enqueuing will simply schedule a quick simulated result.
@@ -152,23 +247,50 @@ export class RoomLobbyGateway
         roomId: data.roomId,
       };
 
-      // Verify client is in room
-      const roomClients = this.server?.sockets?.adapter?.rooms?.get(
-        `room_${data.roomId}`,
-      );
-      console.log(
-        `[Socket] Room ${data.roomId} now has ${roomClients?.size || 0} clients:`,
-        Array.from(roomClients || []).map((id) => {
-          const socket = this.server?.sockets?.sockets?.get(id);
-          return {
-            socketId: id,
-            userId: (socket?.data as any)?.userId || 'unknown',
-          };
-        }),
-      );
+      // Verify client is in room using allSockets() so counts are adapter-aware.
+      try {
+        const roomName = `room_${data.roomId}`;
+        const socketIdSet = await this.server.in(roomName).allSockets();
+        const ids = Array.from(socketIdSet || []);
+        console.log(
+          `[Socket] Room ${data.roomId} now has ${ids.length} clients:`,
+          ids.map((id) => {
+            const socket = this.server?.sockets?.sockets?.get(id);
+            return {
+              socketId: id,
+              userId: (socket?.data as any)?.userId || 'unknown',
+            };
+          }),
+        );
+      } catch (e) {
+        console.log(
+          `[Socket] Failed to inspect room clients for ${data.roomId}:`,
+          e?.message || e,
+        );
+      }
 
       // Notify all players in room about the new player
       this.server.to(`room_${data.roomId}`).emit('roomUpdated', roomInfo);
+
+      // Emit explicit acknowledgement to the joining client so frontend can confirm
+      try {
+        const roomName = `room_${data.roomId}`;
+        const socketIdSet = await this.server.in(roomName).allSockets();
+        const ids = Array.from(socketIdSet || []);
+        const clientsCount = ids.length;
+        client.emit('joinedRoom', {
+          roomId: data.roomId,
+          socketId: client.id,
+          clientsCount,
+        });
+        this.logger.log(
+          `[Join Debug] Emitted joinedRoom to ${client.id} for ${roomName}, clientsCount=${clientsCount}`,
+        );
+      } catch (e) {
+        this.logger.warn(
+          'Failed to emit joinedRoom ack: ' + ((e as any)?.message || e),
+        );
+      }
 
       return { success: true, roomInfo };
     } catch (error) {
@@ -217,22 +339,35 @@ export class RoomLobbyGateway
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      // Call the actual combat start logic from the service
-      const result = await this.roomLobbyService.startCombat(
-        data.roomId,
-        data.userId,
+      // Build job payload: get current room members and dungeonId
+      const roomInfo = await this.roomLobbyService.getRoomInfo(data.roomId);
+      const userIds = (roomInfo?.players || [])
+        .map((p: any) => p.id)
+        .filter(Boolean);
+      const dungeonId = roomInfo?.dungeonId || 1;
+
+      // Enqueue combat job to BullMQ worker
+      const job = await combatQueue.add(
+        'startCombat',
+        {
+          roomId: data.roomId,
+          userIds,
+          dungeonId,
+        },
+        {
+          removeOnComplete: true,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+        },
       );
 
-      // Inform clients that combat has started and provide initial data
-      this.server
-        .to(`room_${data.roomId}`)
-        .emit('combatStarted', result.combatResult);
-
-      return { success: true, ...result };
+      // notify client that job is accepted
+      client.emit('combatEnqueued', { jobId: job.id });
+      return { success: true, jobId: job.id };
     } catch (error) {
       console.error(
-        `[Socket] Failed to start combat for room ${data.roomId}:`,
-        error instanceof Error ? error.message : error,
+        `[Socket] Failed to enqueue combat for room ${data.roomId}:`,
+        error,
       );
       return {
         success: false,

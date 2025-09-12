@@ -160,6 +160,9 @@ export class UserQuest {
   @Column({ default: 0 })
   completionCount: number; // Track how many times completed (for repeatable quests)
 
+  @Column({ default: false })
+  rewardsClaimed: boolean; // Whether rewards for this completion were applied
+
   @CreateDateColumn()
   createdAt: Date;
 

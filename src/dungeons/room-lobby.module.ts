@@ -9,6 +9,7 @@ import { UsersModule } from '../users/users.module';
 import { DungeonsModule } from './dungeons.module';
 import { User } from '../users/user.entity';
 import { Dungeon } from './dungeon.entity';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { Dungeon } from './dungeon.entity';
     CombatResultsModule,
     UsersModule,
     DungeonsModule,
+    CommonModule,
   ],
   controllers: [RoomLobbyController],
   providers: [RoomLobbyService, RoomLobbyGateway],

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 
@@ -15,6 +16,9 @@ import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './chat.dto';
 import { ChatType } from './chat-message.entity';
+import { Inject } from '@nestjs/common';
+import { REDIS_CLIENT } from '../common/redis.provider';
+import Redis from 'ioredis';
 
 interface AuthenticatedSocket extends Socket {
   userId?: number;
@@ -36,6 +40,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private chatService: ChatService,
     private jwtService: JwtService,
+    @Inject(REDIS_CLIENT) private readonly redisClient?: Redis,
   ) {}
 
   handleConnection(client: AuthenticatedSocket) {
@@ -108,6 +113,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!client.userId) {
         client.emit('error', { message: 'Not authenticated or joined.' });
         return;
+      }
+
+      // Defensive check: ensure message field exists and is not empty
+      if (!dto || typeof dto.message !== 'string' || !dto.message.trim()) {
+        client.emit('error', { message: 'Message is required' });
+        return;
+      }
+
+      // Rate limiter using Redis: max 5 messages per 10 seconds per user
+      try {
+        if (this.redisClient) {
+          const key = `rl:chat:world:${client.userId}`;
+          const ttlSeconds = 10;
+          const maxCount = 5;
+          const cnt = await this.redisClient.incr(key);
+          if (cnt === 1) {
+            await this.redisClient.expire(key, ttlSeconds);
+          }
+          if (cnt > maxCount) {
+            client.emit('error', { message: 'Rate limit exceeded' });
+            return;
+          }
+        }
+      } catch (e) {
+        // If Redis fails, allow through (fail-open) but log
+        console.warn('[Chat] Redis rate limiter error:', e?.message || e);
       }
 
       // Ensure the DTO has the correct user ID from the authenticated socket

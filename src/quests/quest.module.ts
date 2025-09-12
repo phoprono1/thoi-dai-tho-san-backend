@@ -7,6 +7,7 @@ import { CombatResult } from '../combat-results/combat-result.entity';
 import { User } from '../users/user.entity';
 import { UsersModule } from '../users/users.module';
 import { UserItemsModule } from '../user-items/user-items.module';
+import { DailyQuestScheduler } from './daily-quest-scheduler';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { UserItemsModule } from '../user-items/user-items.module';
     UserItemsModule,
   ],
   controllers: [QuestController],
-  providers: [QuestService],
+  providers: [QuestService, DailyQuestScheduler],
   exports: [QuestService],
 })
 export class QuestModule {}

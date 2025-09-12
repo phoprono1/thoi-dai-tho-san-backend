@@ -8,11 +8,13 @@ import { ChatGateway } from './chat.gateway';
 import { ChatMessage } from './chat-message.entity';
 import { UsersModule } from '../users/users.module';
 import { User } from '../users/user.entity';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ChatMessage, User]),
     UsersModule,
+    CommonModule,
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
