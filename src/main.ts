@@ -76,6 +76,8 @@ async function bootstrap() {
 
   app.enableCors();
 
+  app.setGlobalPrefix('api');
+
   // Setup Swagger
   const config = new DocumentBuilder()
     .setTitle('Thời Đại Thợ Săn API')
