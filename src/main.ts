@@ -145,7 +145,8 @@ async function bootstrap() {
       );
     } else {
       io.adapter(createAdapter(pubClient, subClient));
-      console.log('Socket.IO Redis adapter configured');
+      io.of('/api').adapter(createAdapter(pubClient, subClient));
+      console.log('Socket.IO Redis adapter configured for / and /api');
     }
   } catch (err) {
     console.warn('Could not configure Socket.IO Redis adapter', err);
