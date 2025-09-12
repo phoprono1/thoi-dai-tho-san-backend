@@ -108,53 +108,56 @@ async function bootstrap() {
   let pubClient: RedisClientType | null = null;
   let subClient: RedisClientType | null = null;
 
-  try {
-    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-    pubClient = createClient({ url: redisUrl });
-    subClient = pubClient.duplicate();
-    await Promise.all([pubClient.connect(), subClient.connect()]);
-
-    // Try to find the existing Socket.IO server that Nest created for gateways.
-    // Do NOT call require('socket.io')(server) because that creates a second
-    // engine.io instance on the same HTTP server and causes handleUpgrade() to
-    // be called twice (see runtime error). Instead attach the redis adapter
-    // to the already-created io server when available.
-    let io: any = null;
+  // Delay setup to allow WebSocket gateways to initialize
+  setTimeout(async () => {
     try {
-      const wsAdapter =
-        (app as any).getWebSocketAdapter && (app as any).getWebSocketAdapter();
-      if (wsAdapter && typeof wsAdapter.getServer === 'function') {
-        io = wsAdapter.getServer();
+      const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+      pubClient = createClient({ url: redisUrl });
+      subClient = pubClient.duplicate();
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+
+      // Try to find the existing Socket.IO server that Nest created for gateways.
+      // Do NOT call require('socket.io')(server) because that creates a second
+      // engine.io instance on the same HTTP server and causes handleUpgrade() to
+      // be called twice (see runtime error). Instead attach the redis adapter
+      // to the already-created io server when available.
+      let io: any = null;
+      try {
+        const wsAdapter =
+          (app as any).getWebSocketAdapter && (app as any).getWebSocketAdapter();
+        if (wsAdapter && typeof wsAdapter.getServer === 'function') {
+          io = wsAdapter.getServer();
+        }
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {
-      // ignore
-    }
 
-    const httpServer = app.getHttpServer();
-    if (!io) {
-      io =
-        (httpServer as any).io ||
-        (httpServer as any)._io ||
-        (httpServer as any).server?.io ||
-        null;
-    }
+      const httpServer = app.getHttpServer();
+      if (!io) {
+        io =
+          (httpServer as any).io ||
+          (httpServer as any)._io ||
+          (httpServer as any).server?.io ||
+          null;
+      }
 
-    if (!io) {
-      console.warn(
-        'No existing Socket.IO server found — skipping redis adapter attach',
-      );
-    } else {
-      io.adapter(createAdapter(pubClient, subClient));
-      io.of('/api').adapter(createAdapter(pubClient, subClient));
-      io.of('/rooms').adapter(createAdapter(pubClient, subClient));
-      io.of('/chat').adapter(createAdapter(pubClient, subClient));
-      console.log(
-        'Socket.IO Redis adapter configured for /, /api, /rooms, and /chat',
-      );
+      if (!io) {
+        console.warn(
+          'No existing Socket.IO server found — skipping redis adapter attach',
+        );
+      } else {
+        io.adapter(createAdapter(pubClient, subClient));
+        io.of('/api').adapter(createAdapter(pubClient, subClient));
+        io.of('/rooms').adapter(createAdapter(pubClient, subClient));
+        io.of('/chat').adapter(createAdapter(pubClient, subClient));
+        console.log(
+          'Socket.IO Redis adapter configured for /, /api, /rooms, and /chat',
+        );
+      }
+    } catch (err) {
+      console.warn('Could not configure Socket.IO Redis adapter', err);
     }
-  } catch (err) {
-    console.warn('Could not configure Socket.IO Redis adapter', err);
-  }
+  }, 2000); // Delay 2 seconds to allow gateways to initialize
 
   // Graceful shutdown: disconnect redis clients when app closes
   const shutdown = async () => {
