@@ -12,5 +12,8 @@ WORKDIR /app
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+COPY run-migrations.js ./
+COPY start.sh ./
+RUN chmod +x start.sh
 EXPOSE 3005
-CMD ["node", "dist/src/main.js"]
+CMD ["./start.sh"]

@@ -27,7 +27,8 @@ export const AppDataSource = new DataSource({
   ...dbConfig,
   entities: [path.resolve(__dirname, '**/*.entity{.ts,.js}')],
   migrations: [path.resolve(__dirname, 'migrations/*{.ts,.js}')],
-  synchronize: process.env.DB_SYNC === 'true', // Chỉ sync khi DB_SYNC=true
+  synchronize: false, // ALWAYS disable synchronize in production
+  migrationsRun: true, // Automatically run migrations on app start
   // Disable verbose SQL logging by default. Set TYPEORM_LOGGING=true to enable.
   logging: process.env.TYPEORM_LOGGING === 'true',
 });
