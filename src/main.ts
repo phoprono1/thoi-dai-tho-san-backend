@@ -146,7 +146,11 @@ async function bootstrap() {
     } else {
       io.adapter(createAdapter(pubClient, subClient));
       io.of('/api').adapter(createAdapter(pubClient, subClient));
-      console.log('Socket.IO Redis adapter configured for / and /api');
+      io.of('/rooms').adapter(createAdapter(pubClient, subClient));
+      io.of('/chat').adapter(createAdapter(pubClient, subClient));
+      console.log(
+        'Socket.IO Redis adapter configured for /, /api, /rooms, and /chat',
+      );
     }
   } catch (err) {
     console.warn('Could not configure Socket.IO Redis adapter', err);
