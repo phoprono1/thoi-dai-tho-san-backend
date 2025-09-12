@@ -17,8 +17,10 @@ async function startCombatWorker() {
   try {
     const { Worker } = await import('bullmq');
     const Redis = (await import('ioredis')).default;
-    const { CombatResultsService } = await import('./combat-results/combat-results.service');
-    
+    const { CombatResultsService } = await import(
+      './combat-results/combat-results.service'
+    );
+
     const connection = {
       host: process.env.REDIS_HOST || '127.0.0.1',
       port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -35,8 +37,10 @@ async function startCombatWorker() {
       'combat',
       async (job) => {
         const { roomId, userIds, dungeonId } = job.data as any;
-        console.log(`Processing combat job for room ${roomId}, users: ${userIds}, dungeon: ${dungeonId}`);
-        
+        console.log(
+          `Processing combat job for room ${roomId}, users: ${userIds}, dungeon: ${dungeonId}`,
+        );
+
         try {
           // Use the correct method name from CombatResultsService
           const result = await combatService.startCombat(userIds, dungeonId);
