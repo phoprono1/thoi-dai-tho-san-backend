@@ -124,7 +124,8 @@ async function bootstrap() {
       let io: any = null;
       try {
         const wsAdapter =
-          (app as any).getWebSocketAdapter && (app as any).getWebSocketAdapter();
+          (app as any).getWebSocketAdapter &&
+          (app as any).getWebSocketAdapter();
         if (wsAdapter && typeof wsAdapter.getServer === 'function') {
           io = wsAdapter.getServer();
         }

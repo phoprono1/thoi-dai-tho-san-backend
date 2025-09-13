@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -17,6 +18,7 @@ import { User } from '../users/user.entity';
 
 @Injectable()
 export class QuestService {
+  private readonly logger = new Logger(QuestService.name);
   constructor(
     @InjectRepository(Quest)
     private questRepository: Repository<Quest>,
@@ -64,6 +66,80 @@ export class QuestService {
       order: { createdAt: 'DESC' },
     });
 
+    // Ensure the user has rows for all currently active quests (especially
+    // daily quests). In some situations (legacy data, manual DB edits, or
+    // quest imports) quests may exist but weren't assigned to existing
+    // users. Create missing user_quests with AVAILABLE status so the API
+    // returns them immediately.
+    try {
+      const existingQuestIds = new Set(all.map((uq) => uq.questId));
+      const missingQuests = await this.questRepository.find({
+        where: { isActive: true },
+      });
+
+      const toCreate = [] as Partial<UserQuest>[];
+      const today = new Date();
+      for (const q of missingQuests) {
+        if (!existingQuestIds.has(q.id)) {
+          toCreate.push({
+            userId,
+            questId: q.id,
+            status: QuestStatus.AVAILABLE,
+            progress: {},
+            // For daily quests, set lastResetDate to today so they are
+            // considered freshly reset; leave null for non-daily quests.
+            lastResetDate: q.type === QuestType.DAILY ? today : null,
+          });
+        }
+      }
+
+      if (toCreate.length > 0) {
+        const ids = toCreate.map((t) => t.questId).join(',');
+        this.logger.debug(
+          `Auto-assigning ${toCreate.length} active quests to user ${userId}: questIds=${ids}`,
+        );
+
+        // Save in bulk; capture any individual errors and log details
+        try {
+          const saved = await this.userQuestRepository.save(toCreate as any);
+          // Log saved ids and names (if relation loaded afterwards)
+          const savedIds = Array.isArray(saved)
+            ? saved.map((s) => s.questId || s.id)
+            : [saved.questId || saved.id];
+          this.logger.debug(
+            `Auto-assign succeeded for user ${userId}: savedQuestIds=${savedIds.join(',')}`,
+          );
+        } catch (saveErr) {
+          // Non-fatal — log and continue but include full error info
+          this.logger.error(
+            `Failed to auto-assign some quests to user ${userId}: ${(saveErr as Error)?.message || String(saveErr)}`,
+          );
+          try {
+            // attempt to save individually to surface which one fails
+            for (const t of toCreate) {
+              try {
+                const single = await this.userQuestRepository.save(t as any);
+                this.logger.debug(
+                  `Auto-assign single saved for user ${userId}: questId=${single.questId || single.id}`,
+                );
+              } catch (oneErr) {
+                this.logger.error(
+                  `Auto-assign single FAILED for user ${userId}: questId=${t.questId}, error=${(oneErr as Error)?.message || String(oneErr)}`,
+                );
+              }
+            }
+          } catch (e) {
+            this.logger.error(
+              'Error during individual auto-assign attempts',
+              e as unknown as Error,
+            );
+          }
+        }
+      }
+    } catch {
+      // Ignore any errors during auto-assignment — we still return existing rows
+    }
+
     // Lazy reset: If a daily quest hasn't been reset today, reset it when
     // the user fetches their quests. This complements the scheduled job and
     // ensures users who hit the server after a missed cron still get fresh
@@ -72,13 +148,27 @@ export class QuestService {
     for (const uq of all) {
       try {
         if (uq.quest && uq.quest.type === QuestType.DAILY) {
-          if (!uq.lastResetDate || uq.lastResetDate.toDateString() !== today) {
+          // lastResetDate may come back from the DB as a string (YYYY-MM-DD)
+          // or as a Date object depending on the driver. Normalize safely.
+          const lastReset = uq.lastResetDate
+            ? uq.lastResetDate instanceof Date
+              ? uq.lastResetDate.toDateString()
+              : new Date(uq.lastResetDate).toDateString()
+            : null;
+
+          if (!lastReset || lastReset !== today) {
             // Reset this daily quest for the user
             await this.resetDailyQuest(userId, uq.quest.id);
           }
         }
-      } catch {
-        // Ignore reset failures; continue returning other quests
+      } catch (err) {
+        // Log reset failures so we can diagnose DB type issues instead of
+        // silently swallowing them.
+        this.logger.warn(
+          `Failed to reset daily quest ${uq.questId} for user ${userId}: ${
+            (err as Error)?.message || String(err)
+          }`,
+        );
       }
     }
 
@@ -400,6 +490,64 @@ export class QuestService {
       // ignore inventory fetch errors for API convenience
     }
 
+    // If the userQuest exists but lacks collectItems progress, populate a
+    // transient progress object from the authoritative inventory so the
+    // frontend can show partial progress (e.g., 5/50) even when the quest
+    // hasn't been completed. We do NOT persist this change to the DB;
+    // this simply augments the returned object for UI convenience.
+    try {
+      if (
+        userQuest &&
+        userQuest.quest &&
+        userQuest.quest.requirements?.collectItems &&
+        userQuest.quest.requirements.collectItems.length > 0
+      ) {
+        const currentProgress = userQuest.progress || {};
+        const collectReqs = userQuest.quest.requirements.collectItems;
+
+        // Ensure we have an array to merge into
+        const collectProgress = Array.isArray(currentProgress.collectItems)
+          ? [...currentProgress.collectItems]
+          : [];
+
+        for (const itemReq of collectReqs) {
+          const itemIdNum = Number(itemReq.itemId);
+
+          // If progress already contains this item, skip
+          const existing = collectProgress.find(
+            (p) => Number(p.itemId) === itemIdNum,
+          );
+          if (existing) continue;
+
+          // Look up inventory for this item
+          const inv = userItems.find(
+            (ui) =>
+              Number(ui.itemId) === itemIdNum ||
+              Number(ui.item?.id) === itemIdNum,
+          );
+          const haveQty = inv?.quantity || 0;
+
+          collectProgress.push({
+            itemId: itemIdNum,
+            current: haveQty,
+            required: Number(itemReq.quantity),
+          });
+        }
+
+        userQuest.progress = {
+          ...currentProgress,
+          collectItems: collectProgress,
+        };
+      }
+    } catch (e) {
+      // Non-fatal: if any error occurs while building progress for the UI,
+      // ignore it so we still return the core response.
+      this.logger.warn(
+        'Failed to build transient collectItems progress for API response',
+        e,
+      );
+    }
+
     return { completed, userQuest, userItems };
   }
 
@@ -562,9 +710,23 @@ export class QuestService {
         // For daily quests, check if needs reset
         if (quest.type === QuestType.DAILY) {
           const today = new Date().toDateString();
-          if (userQuest?.lastResetDate?.toDateString() !== today) {
-            // Reset daily quest
-            await this.resetDailyQuest(userId, quest.id);
+          try {
+            const lastReset = userQuest?.lastResetDate
+              ? userQuest.lastResetDate instanceof Date
+                ? userQuest.lastResetDate.toDateString()
+                : new Date(userQuest.lastResetDate).toDateString()
+              : null;
+
+            if (lastReset !== today) {
+              // Reset daily quest
+              await this.resetDailyQuest(userId, quest.id);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `Failed to check/reset daily quest ${quest.id} for user ${userId}: ${
+                (err as Error)?.message || String(err)
+              }`,
+            );
           }
         }
 

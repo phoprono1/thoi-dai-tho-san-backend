@@ -19,7 +19,7 @@
     "start:worker": "ts-node -r tsconfig-paths/register src/workers/combat.worker.ts",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:run": "npm run typeorm -- --dataSource src/data-source.ts migration:run",
-    "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts",
+    "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts ./src/migrations/%MIGRATION_NAME%",
     "migration:create": "typeorm-ts-node-commonjs migration:create ./src/migrations/%MIGRATION_NAME%",
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
     "schema:drop": "npm run typeorm -- schema:drop -d src/data-source.ts",
