@@ -49,35 +49,41 @@ export class AdminExportController {
           'isRepeatable',
         ],
       ],
-      'character-classes': [[
-        'name',
-        'description',
-        'type',
-        'tier',
-        'requiredLevel',
-        'statBonuses',
-        'skillUnlocks',
-      ]],
-      levels: [[
-        'level',
-        'name',
-        'experienceRequired',
-        'rewards',
-        'maxHp',
-        'maxMp',
-        'attack',
-        'defense',
-        'speed',
-      ]],
-      dungeons: [[
-        'name',
-        'monsterIds',
-        'monsterCounts',
-        'levelRequirement',
-        'isHidden',
-        'requiredItem',
-        'dropItems',
-      ]],
+      'character-classes': [
+        [
+          'name',
+          'description',
+          'type',
+          'tier',
+          'requiredLevel',
+          'statBonuses',
+          'skillUnlocks',
+        ],
+      ],
+      levels: [
+        [
+          'level',
+          'name',
+          'experienceRequired',
+          'rewards',
+          'maxHp',
+          'maxMp',
+          'attack',
+          'defense',
+          'speed',
+        ],
+      ],
+      dungeons: [
+        [
+          'name',
+          'monsterIds',
+          'monsterCounts',
+          'levelRequirement',
+          'isHidden',
+          'requiredItem',
+          'dropItems',
+        ],
+      ],
     };
 
     const template = templates[resource] || [['id', 'name']];
@@ -165,9 +171,7 @@ export class AdminExportController {
             expiresAt: q.expiresAt?.toISOString() || '',
           });
         });
-      }
-
-      else if (resource === 'character-classes') {
+      } else if (resource === 'character-classes') {
         const rows = await AppDataSource.getRepository(CharacterClass).find();
         rows.forEach((c) => {
           stream.write({
@@ -179,7 +183,9 @@ export class AdminExportController {
             requiredLevel: c.requiredLevel,
             statBonuses: JSON.stringify(c.statBonuses || {}),
             skillUnlocks: JSON.stringify(c.skillUnlocks || []),
-            advancementRequirements: JSON.stringify(c.advancementRequirements || {}),
+            advancementRequirements: JSON.stringify(
+              c.advancementRequirements || {},
+            ),
             previousClassId: c.previousClassId,
           });
         });

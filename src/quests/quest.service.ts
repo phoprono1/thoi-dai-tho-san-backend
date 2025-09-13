@@ -13,7 +13,10 @@ import {
 } from './quest.entity';
 import { UsersService } from '../users/users.service';
 import { UserItemsService } from '../user-items/user-items.service';
-import { CombatResult } from '../combat-results/combat-result.entity';
+import {
+  CombatResult,
+  CombatResultType,
+} from '../combat-results/combat-result.entity';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -781,7 +784,7 @@ export class QuestService {
       return; // Already processed
     }
 
-    // Load the combat result so we can compare timestamps and dungeon
+    // Load the combat result so we can compare timestamps, dungeon and result
     const combatResult = await this.combatResultRepository.findOne({
       where: { id: combatResultId },
     });
@@ -814,8 +817,13 @@ export class QuestService {
 
       let progressUpdated = false;
 
-      // Update dungeon completion progress
-      if (combatData.dungeonId && quest.requirements.completeDungeons) {
+      // Update dungeon completion progress ONLY on victory results
+      if (
+        combatData.dungeonId &&
+        quest.requirements.completeDungeons &&
+        combatResult &&
+        combatResult.result === CombatResultType.VICTORY
+      ) {
         for (const dungeonReq of quest.requirements.completeDungeons) {
           if (dungeonReq.dungeonId === combatData.dungeonId) {
             const currentProgress = userQuest.progress?.completeDungeons || [];
@@ -946,10 +954,50 @@ export class QuestService {
     return updatedQuest;
   }
 
-  async deleteQuest(id: number): Promise<void> {
-    const result = await this.questRepository.delete(id);
-    if (result.affected === 0) {
-      throw new Error('Quest not found');
+  async deleteQuest(id: number, force: boolean = false): Promise<void> {
+    // Safe deletion: if force=false, attempt a simple delete and surface
+    // DB constraint errors as readable messages. If force=true, remove
+    // dependent rows (user_quests, quest_combat_tracking) before deleting.
+    if (!force) {
+      const result = await this.questRepository.delete(id);
+      if (result.affected === 0) {
+        throw new Error('Quest not found');
+      }
+      return;
+    }
+
+    // Force delete: perform manual cleanup in correct order within a transaction
+    const queryRunner =
+      this.questRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Delete quest combat tracking entries
+      await queryRunner.manager.delete('quest_combat_tracking', {
+        questId: id,
+      });
+
+      // Delete user_quests rows
+      await queryRunner.manager.delete('user_quests', {
+        questId: id,
+      });
+
+      // Finally delete quest
+      const delRes = await queryRunner.manager.delete('quests', {
+        id,
+      });
+      if (!delRes.affected || delRes.affected === 0) {
+        throw new Error('Quest not found during forced delete');
+      }
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      // Re-throw a readable error
+      const message = (err as Error)?.message || String(err);
+      throw new Error(`Failed to force-delete quest: ${message}`);
+    } finally {
+      await queryRunner.release();
     }
   }
 

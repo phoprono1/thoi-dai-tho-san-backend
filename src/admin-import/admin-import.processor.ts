@@ -1,5 +1,12 @@
+/* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-misused-promises */
+/* eslint-disable no-control-regex */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import * as fs from 'fs';
-const csv: any = require('fast-csv');
+import csv from 'fast-csv';
 import { Logger } from '@nestjs/common';
 import * as path from 'path';
 import * as os from 'os';
@@ -112,14 +119,18 @@ export async function processImportJob(job: { id?: string; data: any }) {
   // Detect delimiter (tab vs comma) by inspecting the first line header
   let delimiter: string = ',';
   try {
-    const firstLine = fs.readFileSync(parsedFilePath, { encoding: 'utf8' }).split(/\r?\n/)[0] || '';
+    const firstLine =
+      fs.readFileSync(parsedFilePath, { encoding: 'utf8' }).split(/\r?\n/)[0] ||
+      '';
     // If header contains tabs and no commas, treat as TSV
     if (firstLine.includes('\t') && !firstLine.includes(',')) {
       delimiter = '\t';
       logger.log(`Import job ${job.id}: detected tab-delimited (TSV) file`);
     }
   } catch (e) {
-    logger.warn(`Import job ${job.id}: delimiter detection failed: ${String(e)}`);
+    logger.warn(
+      `Import job ${job.id}: delimiter detection failed: ${String(e)}`,
+    );
   }
 
   return new Promise((resolve, reject) => {

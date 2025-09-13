@@ -7,6 +7,7 @@ import { RoomLobby, RoomPlayer } from './room-lobby.entity';
 import { CombatResultsModule } from '../combat-results/combat-results.module';
 import { UsersModule } from '../users/users.module';
 import { DungeonsModule } from './dungeons.module';
+import { UserItemsModule } from '../user-items/user-items.module';
 import { User } from '../users/user.entity';
 import { Dungeon } from './dungeon.entity';
 import { CommonModule } from '../common/common.module';
@@ -17,6 +18,7 @@ import { CommonModule } from '../common/common.module';
     CombatResultsModule,
     UsersModule,
     DungeonsModule,
+    UserItemsModule,
     CommonModule,
   ],
   controllers: [RoomLobbyController],

@@ -14,6 +14,7 @@ import {
 import { User } from '../users/user.entity';
 import { Dungeon } from '../dungeons/dungeon.entity';
 import { CombatResultsService } from '../combat-results/combat-results.service';
+import { UserItemsService } from '../user-items/user-items.service';
 
 @Injectable()
 export class RoomLobbyService {
@@ -27,6 +28,7 @@ export class RoomLobbyService {
     @InjectRepository(Dungeon)
     private dungeonsRepository: Repository<Dungeon>,
     private combatResultsService: CombatResultsService,
+    private userItemsService: UserItemsService,
   ) {}
 
   async createRoom(
@@ -55,6 +57,33 @@ export class RoomLobbyService {
     // Kiểm tra level requirement
     if (host.level < dungeon.levelRequirement) {
       throw new BadRequestException('Level không đủ để vào hầm ngục này');
+    }
+
+    // Nếu dungeon yêu cầu vật phẩm, kiểm tra và tiêu thụ 1 cái
+    if (dungeon.requiredItem) {
+      try {
+        const userItem = await this.userItemsService.findByUserAndItem(
+          hostId,
+          dungeon.requiredItem,
+        );
+
+        if (!userItem || (userItem.quantity || 0) <= 0) {
+          throw new BadRequestException('Thiếu vật phẩm để vào hầm ngục');
+        }
+
+        const removed = await this.userItemsService.removeItemFromUser(
+          hostId,
+          dungeon.requiredItem,
+          1,
+        );
+
+        if (!removed) {
+          throw new BadRequestException('Không thể tiêu thụ vật phẩm yêu cầu');
+        }
+      } catch (err) {
+        if (err instanceof BadRequestException) throw err;
+        throw new BadRequestException('Không thể kiểm tra vật phẩm yêu cầu');
+      }
     }
 
     // Tạo phòng
@@ -166,6 +195,38 @@ export class RoomLobbyService {
     }
 
     // Thêm player vào phòng
+    // Nếu dungeon yêu cầu vật phẩm, kiểm tra và tiêu thụ 1 cái trước khi thêm
+    if (
+      room.dungeon &&
+      (room.dungeon.requiredItem || room.dungeon.requiredItem === 0)
+    ) {
+      try {
+        const required = room.dungeon.requiredItem;
+        if (required) {
+          const userItem = await this.userItemsService.findByUserAndItem(
+            playerId,
+            required,
+          );
+          if (!userItem || (userItem.quantity || 0) <= 0) {
+            throw new BadRequestException('Thiếu vật phẩm để vào hầm ngục');
+          }
+          const removed = await this.userItemsService.removeItemFromUser(
+            playerId,
+            required,
+            1,
+          );
+          if (!removed) {
+            throw new BadRequestException(
+              'Không thể tiêu thụ vật phẩm yêu cầu',
+            );
+          }
+        }
+      } catch (err) {
+        if (err instanceof BadRequestException) throw err;
+        throw new BadRequestException('Không thể kiểm tra vật phẩm yêu cầu');
+      }
+    }
+
     const roomPlayer = this.roomPlayerRepository.create({
       room,
       roomId,

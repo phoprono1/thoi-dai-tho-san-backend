@@ -1,3 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { AppDataSource } from '../data-source';
 import { Item } from '../items/item.entity';
 import { ItemType } from '../items/item-types.enum';
@@ -23,7 +29,11 @@ function parseJsonField(val: any, defaultValue: any) {
   let s = val.trim();
   // CSV tools sometimes double-quote JSON and escape inner quotes as "".
   // Normalize common patterns: remove surrounding quotes and unescape doubled quotes.
-  if (s.length >= 2 && ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))) {
+  if (
+    s.length >= 2 &&
+    ((s.startsWith('"') && s.endsWith('"')) ||
+      (s.startsWith("'") && s.endsWith("'")))
+  ) {
     s = s.slice(1, -1);
   }
   // Unescape doubled quotes to single quotes for JSON parsing
@@ -32,7 +42,9 @@ function parseJsonField(val: any, defaultValue: any) {
   try {
     return JSON.parse(s);
   } catch (e) {
-    logger.warn(`parseJsonField: JSON parse failed, returning default. error=${String(e)} value=${s}`);
+    logger.warn(
+      `parseJsonField: JSON parse failed, returning default. error=${String(e)} value=${s}`,
+    );
     return defaultValue;
   }
 }
@@ -57,7 +69,10 @@ async function saveInBatches<T>(
       // initialize may throw if already initialized in a different context
       await AppDataSource.initialize();
     } catch (initErr) {
-      logger.warn('AppDataSource.initialize() warning in import handler:', String(initErr));
+      logger.warn(
+        'AppDataSource.initialize() warning in import handler:',
+        String(initErr),
+      );
     }
   }
 
@@ -223,7 +238,9 @@ export async function processDungeons(rows: Record<string, any>[]) {
       d.monsterIds = parseJsonField(r.monsterIds, []);
       d.monsterCounts = parseJsonField(r.monsterCounts, []);
       d.levelRequirement = r.levelRequirement ? Number(r.levelRequirement) : 1;
-      d.isHidden = r.isHidden ? (r.isHidden === 'true' || r.isHidden === '1') : false;
+      d.isHidden = r.isHidden
+        ? r.isHidden === 'true' || r.isHidden === '1'
+        : false;
       d.requiredItem = r.requiredItem ? Number(r.requiredItem) : null;
       d.dropItems = parseJsonField(r.dropItems, []);
       entities.push(d);
@@ -250,7 +267,9 @@ export async function processLevels(rows: Record<string, any>[]) {
       const l = new Level();
       if (r.id) l.id = Number(r.id);
       l.level = Number(r.level);
-      l.experienceRequired = r.experienceRequired ? Number(r.experienceRequired) : 0;
+      l.experienceRequired = r.experienceRequired
+        ? Number(r.experienceRequired)
+        : 0;
       l.name = r.name ? String(r.name) : null;
       l.rewards = parseJsonField(r.rewards, {});
       l.maxHp = r.maxHp ? Number(r.maxHp) : 100;
@@ -283,12 +302,17 @@ export async function processCharacterClasses(rows: Record<string, any>[]) {
       if (r.id) c.id = Number(r.id);
       c.name = String(r.name).trim();
       c.description = r.description ? String(r.description) : '';
-      c.type = r.type ? (r.type as ClassType) : (ClassType.WARRIOR as ClassType);
-      c.tier = r.tier ? Number(r.tier) as any : (1 as any);
+      c.type = r.type
+        ? (r.type as ClassType)
+        : (ClassType.WARRIOR as ClassType);
+      c.tier = r.tier ? (Number(r.tier) as any) : (1 as any);
       c.requiredLevel = r.requiredLevel ? Number(r.requiredLevel) : 1;
       c.statBonuses = parseJsonField(r.statBonuses, {});
       c.skillUnlocks = parseJsonField(r.skillUnlocks, []);
-      c.advancementRequirements = parseJsonField(r.advancementRequirements, null);
+      c.advancementRequirements = parseJsonField(
+        r.advancementRequirements,
+        null,
+      );
       c.previousClassId = r.previousClassId ? Number(r.previousClassId) : null;
       entities.push(c);
     } catch (err) {
@@ -296,8 +320,20 @@ export async function processCharacterClasses(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<CharacterClass>(CharacterClass, entities, 200, ['id']);
+  const res = await saveInBatches<CharacterClass>(
+    CharacterClass,
+    entities,
+    200,
+    ['id'],
+  );
   return { ...res, parseErrors: errors };
 }
 
-export default { processItems, processMonsters, processQuests, processDungeons, processLevels, processCharacterClasses };
+export default {
+  processItems,
+  processMonsters,
+  processQuests,
+  processDungeons,
+  processLevels,
+  processCharacterClasses,
+};

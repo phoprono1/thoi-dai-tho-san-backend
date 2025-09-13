@@ -5,9 +5,15 @@ import { UsersService } from './users.service';
 import { User } from './user.entity';
 import { LevelsModule } from '../levels/levels.module';
 import { UserStatsModule } from '../user-stats/user-stats.module';
+import { UserPowerModule } from '../user-power/user-power.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), LevelsModule, UserStatsModule],
+  imports: [
+    TypeOrmModule.forFeature([User]),
+    LevelsModule,
+    UserStatsModule,
+    UserPowerModule,
+  ],
   controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],

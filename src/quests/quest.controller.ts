@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { QuestService } from './quest.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -38,8 +39,13 @@ export class QuestController {
   }
 
   @Delete(':id')
-  async deleteQuest(@Param('id', ParseIntPipe) id: number) {
-    await this.questService.deleteQuest(id);
+  async deleteQuest(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('force') forceQuery?: string,
+  ) {
+    // Allow force deletion via query param `?force=true`
+    const force = forceQuery === 'true';
+    await this.questService.deleteQuest(id, force);
     return { message: 'Quest deleted successfully' };
   }
 

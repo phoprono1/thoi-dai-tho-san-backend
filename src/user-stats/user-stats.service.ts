@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserStat } from './user-stat.entity';
+import { UserPowerService } from '../user-power/user-power.service';
 
 @Injectable()
 export class UserStatsService {
   constructor(
     @InjectRepository(UserStat)
     private userStatsRepository: Repository<UserStat>,
+    private readonly userPowerService: UserPowerService,
   ) {}
 
   findAll(): Promise<UserStat[]> {
@@ -30,7 +32,16 @@ export class UserStatsService {
 
   async create(userStat: Partial<UserStat>): Promise<UserStat> {
     const newUserStat = this.userStatsRepository.create(userStat);
-    return this.userStatsRepository.save(newUserStat);
+    const saved = await this.userStatsRepository.save(newUserStat);
+    // Ensure user_power exists for new user stat
+    try {
+      if (saved.userId) {
+        await this.userPowerService.computeAndSaveForUser(saved.userId);
+      }
+    } catch {
+      // best-effort: don't fail create if compute fails
+    }
+    return saved;
   }
 
   async update(
@@ -38,7 +49,15 @@ export class UserStatsService {
     userStat: Partial<UserStat>,
   ): Promise<UserStat | null> {
     await this.userStatsRepository.update(id, userStat);
-    return this.findOne(id);
+    const s = await this.findOne(id);
+    try {
+      if (s && s.userId) {
+        await this.userPowerService.computeAndSaveForUser(s.userId);
+      }
+    } catch {
+      // continue
+    }
+    return s;
   }
 
   async remove(id: number): Promise<void> {
@@ -66,6 +85,13 @@ export class UserStatsService {
     userStats.currentHp = userStats.maxHp;
 
     await this.userStatsRepository.save(userStats);
+    try {
+      if (userStats.userId) {
+        await this.userPowerService.computeAndSaveForUser(userStats.userId);
+      }
+    } catch {
+      // continue
+    }
     return userStats;
   }
 
@@ -95,6 +121,13 @@ export class UserStatsService {
     userStats.currentHp = userStats.maxHp;
 
     await this.userStatsRepository.save(userStats);
+    try {
+      if (userStats.userId) {
+        await this.userPowerService.computeAndSaveForUser(userStats.userId);
+      }
+    } catch {
+      // continue
+    }
     return userStats;
   }
 }

@@ -15,6 +15,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
+import { UserPowerService } from '../user-power/user-power.service';
 import { User } from './user.entity';
 import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
@@ -26,6 +27,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly levelsService: LevelsService,
     private readonly userStatsService: UserStatsService,
+    private readonly userPowerService: UserPowerService,
   ) {}
 
   @Get()
@@ -49,8 +51,19 @@ export class UsersController {
     status: 404,
     description: 'Không tìm thấy người dùng',
   })
-  findOne(@Param('id') id: string): Promise<User | null> {
-    return this.usersService.findOne(+id);
+  async findOne(@Param('id') id: string): Promise<any> {
+    const user = await this.usersService.findOne(+id);
+    if (!user) return null;
+
+    // Try to get authoritative power (compute if missing) and return a plain object
+    try {
+      const power = await this.userPowerService.computeAndSaveForUser(user.id);
+      // return a plain object so serialization includes dynamic fields
+      return { ...user, combatPower: power };
+    } catch {
+      // fallback to returning the user object as-is
+      return user;
+    }
   }
 
   @Post()

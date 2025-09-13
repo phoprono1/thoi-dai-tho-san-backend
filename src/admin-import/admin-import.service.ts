@@ -31,7 +31,7 @@ export class AdminImportService {
     // Defer to a bull queue if available; if not, run inline (safe fallback)
     try {
       // Dynamically require bullmq to avoid hard dependency at module load
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const { Queue } = require('bullmq');
       const IORedis = require('ioredis');
       const connection = new IORedis({
@@ -47,7 +47,7 @@ export class AdminImportService {
     } catch (err) {
       this.logger.warn(
         'BullMQ not available or failed to enqueue; falling back to inline processing',
-        err as any,
+        err,
       );
       // Inline processing fallback: do not auto-start here. Caller may opt-in
       // to synchronous inline processing by calling processInline. Return jobId
@@ -78,7 +78,7 @@ export class AdminImportService {
     try {
       // Dynamically require the processor which exports processImportJob
       // CommonJS export: module.exports = { processImportJob }
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const processor = require('./admin-import.processor');
       // processor.processImportJob expects an object like { id, data }
       const result = await processor.processImportJob({
@@ -87,7 +87,7 @@ export class AdminImportService {
       });
       return { jobId, result };
     } catch (err) {
-      this.logger.error('Inline import processing failed', err as any);
+      this.logger.error('Inline import processing failed', err);
       return { jobId, result: { success: false, error: String(err) } };
     }
   }
@@ -99,7 +99,7 @@ export class AdminImportService {
       if (!job) return { jobId, status: 'not_found' };
       const state = await job.getState();
       // job.progress() has differing types across bull versions; avoid calling
-      const progress = (job as any).progress || null;
+      const progress = job.progress || null;
       return { jobId, state, progress, returnvalue: job.returnvalue };
     } catch (err) {
       return { jobId, status: 'error', error: String(err) };

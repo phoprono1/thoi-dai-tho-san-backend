@@ -1,25 +1,45 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
+import { UserPowerService } from '../user-power/user-power.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
     private readonly levelsService: LevelsService,
     private readonly userStatsService: UserStatsService,
+    private readonly userPowerService: UserPowerService,
   ) {}
 
   findAll(): Promise<User[]> {
     return this.usersRepository.find();
   }
 
-  findOne(id: number): Promise<User | null> {
-    return this.usersRepository.findOneBy({ id });
+  async findOne(id: number): Promise<User | null> {
+    const user = await this.usersRepository.findOneBy({ id });
+    if (!user) return null;
+
+    // Ensure there's an authoritative user_power row. If missing, compute and persist it.
+    try {
+      // userPowerService.computeAndSaveForUser will upsert and return the power.
+      const power = await this.userPowerService.computeAndSaveForUser(user.id);
+      // Attach non-persistent field for convenience when the API returns the user object
+      // so frontend can read `combatPower` directly from the user payload.
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      user.combatPower = power;
+    } catch (err: unknown) {
+      // Don't fail the whole request if compute fails; log and continue.
+      this.logger.error('Failed to compute user_power on read', err as any);
+    }
+
+    return user;
   }
 
   findByUsername(username: string): Promise<User | null> {
