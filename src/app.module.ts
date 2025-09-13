@@ -26,6 +26,7 @@ import { DonorsModule } from './donors/donors.module';
 import { QuestModule } from './quests/quest.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
+import { AdminImportModule } from './admin-import/admin-import.module';
 import { CommonModule } from './common/common.module';
 import { HealthModule } from './health/health.module';
 
@@ -79,6 +80,7 @@ import { HealthModule } from './health/health.module';
     DonorsModule,
     QuestModule,
     MonsterModule,
+    AdminImportModule,
   ],
   controllers: [AppController],
   providers: [AppService],
