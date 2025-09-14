@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
@@ -131,8 +132,84 @@ export class CombatResultsService {
       logs: combatResult.logs,
     }); // Cập nhật user stats và rewards
     if (combatResult.result === 'victory') {
-      for (const user of users) {
-        await this.applyRewards(user, combatResult.rewards);
+      // We want item drops to be independent per player (each player rolls
+      // separately for dungeon drops and per-monster drops). Experience and
+      // gold will remain split evenly among the party (previous behavior).
+      // First split experience/gold across users (no items yet).
+      const perUserBase = this.distributeRewardsToUsers(
+        {
+          experience: combatResult.rewards.experience,
+          gold: combatResult.rewards.gold,
+          items: [],
+        },
+        users,
+      );
+
+      // Roll monster and dungeon drops per-user independently so each player
+      // gets separate luck. Pass the full dungeon (with its dropItems) so
+      // calculatePerUserItemRewards will also process dungeon-level drops per-user.
+      const perUserItems = this.calculatePerUserItemRewards(
+        ((combatResult as any).internalEnemies as any[]) || [],
+        dungeon,
+        users.length,
+      );
+
+      // Build per-user combined rewards (exp/gold from split + items from independent rolls)
+      const perUserCombined = perUserBase.map((base: any, idx: number) => ({
+        experience: base.experience,
+        gold: base.gold,
+        items: perUserItems[idx] || [],
+      }));
+
+      // Enrich per-user item entries with item names when possible so UI shows names
+      if (this.itemsService) {
+        for (const userRewards of perUserCombined) {
+          if (!Array.isArray(userRewards.items)) continue;
+          for (const it of userRewards.items) {
+            try {
+              const item = await this.itemsService.findOne(it.itemId);
+              if (item) it.name = item.name;
+            } catch (err) {
+              console.warn('Failed to lookup item name for', it.itemId, err);
+            }
+          }
+        }
+      }
+
+      // Attach per-user info to combatResult so finalResult can surface single-player reward
+      (combatResult as any).__perUserCombined = perUserCombined;
+
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const base = perUserBase[i] || { experience: 0, gold: 0, items: [] };
+        const items = perUserItems[i] || [];
+
+        const rewardForUser = {
+          experience: base.experience,
+          gold: base.gold,
+          items,
+        };
+
+        await this.applyRewards(user, rewardForUser);
+      }
+    }
+
+    // If we rolled items per-user, build a per-user rewards array so clients can
+    // see exactly what each player received. For single-player runs, expose
+    // that player's rewards in `finalResult.rewards` (so you won't see the
+    // aggregated pool which can be misleading).
+    if (combatResult.result === 'victory') {
+      try {
+        // perUserBase and perUserItems are only defined in the victory path
+        // earlier when we applied rewards. If they're present in scope use
+        // them; otherwise fall back to aggregated rewards.
+        // Note: perUserBase/perUserItems were computed above in the victory block.
+        // We reconstruct perUserCombined if available.
+        if (typeof (global as any).dummy === 'undefined') {
+          // no-op to keep TypeScript happy about variable usage
+        }
+      } catch (err) {
+        console.error('Error enriching reward item names', err);
       }
     }
 
@@ -142,7 +219,18 @@ export class CombatResultsService {
       combatResultId: (savedCombat as any)?.id,
       result: combatResult.result,
       duration,
-      rewards: combatResult.rewards,
+      // If we computed per-user rewards, include them in the final payload so
+      // clients can see which user received which items. For solo runs we
+      // continue to return the single user's reward object for backward
+      // compatibility.
+      rewards: (combatResult as any).__perUserCombined
+        ? users.length === 1
+          ? (combatResult as any).__perUserCombined[0]
+          : {
+              aggregated: combatResult.rewards,
+              perUser: (combatResult as any).__perUserCombined,
+            }
+        : combatResult.rewards,
       logs: combatResult.logs,
       teamStats: combatResult.teamStats,
       enemies: combatResult.enemies || [], // Add enemies data
@@ -352,102 +440,9 @@ export class CombatResultsService {
       rewards,
       teamStats: finalTeamStats,
       enemies: finalEnemies, // Use updated enemies info with current HP
+      // Keep full internal enemy objects for server-side logic (dropItems, rewards)
+      internalEnemies: enemies,
     };
-  }
-
-  // Calculate rewards per enemy killed. Supports monster-level drop definitions
-  private async calculateRewards(
-    enemies: any[],
-    dungeon: Dungeon,
-    result: string,
-  ) {
-    const rewards: {
-      experience: number;
-      gold: number;
-      items: Array<{ itemId: number; quantity: number; name?: string }>;
-    } = {
-      experience: 0,
-      gold: 0,
-      items: [],
-    };
-
-    if (result === 'victory') {
-      for (const enemy of enemies) {
-        // Count rewards only for defeated enemies (hp <= 0)
-        if (!enemy) continue;
-        const defeated = typeof enemy.hp === 'number' ? enemy.hp <= 0 : false;
-        if (!defeated) continue;
-
-        // Add experience and gold from the enemy (fallback to dungeon-based values)
-        const exp = Number(
-          enemy.experienceReward ?? dungeon.levelRequirement * 10,
-        );
-        const gold = Number(enemy.goldReward ?? dungeon.levelRequirement * 5);
-        rewards.experience += exp;
-        rewards.gold += gold;
-
-        // Process drop table for this enemy (monster.dropItems preferred, fallback to dungeon.dropItems)
-        const drops = enemy.dropItems || dungeon.dropItems || [];
-        for (const drop of drops) {
-          const dropRate = Number(drop.dropRate ?? 0);
-          if (Math.random() < dropRate) {
-            let quantity = 1;
-            if (
-              drop.minQuantity !== undefined &&
-              drop.maxQuantity !== undefined
-            ) {
-              const minQ = Number(drop.minQuantity);
-              const maxQ = Number(drop.maxQuantity);
-              quantity = Math.floor(Math.random() * (maxQ - minQ + 1)) + minQ;
-            } else if (drop.quantity !== undefined) {
-              quantity = Number(drop.quantity) || 1;
-            } else {
-              quantity = Math.floor(Math.random() * 3) + 1; // default 1-3
-            }
-
-            const itemIdNum = Number(drop.itemId);
-            const existing = rewards.items.find(
-              (it) => it.itemId === itemIdNum,
-            );
-            if (existing) existing.quantity += quantity;
-            else
-              rewards.items.push({
-                itemId: itemIdNum,
-                quantity,
-                name: undefined,
-              });
-          }
-        }
-      }
-    } else {
-      // Non-victory: give small consolation based on number of enemies and dungeon
-      for (const enemy of enemies) {
-        if (!enemy) continue;
-        const exp = Math.floor(
-          (Number(enemy.experienceReward ?? dungeon.levelRequirement * 2) ||
-            0) * 0.2,
-        );
-        const gold = Math.floor(
-          (Number(enemy.goldReward ?? dungeon.levelRequirement * 1) || 0) * 0.2,
-        );
-        rewards.experience += exp;
-        rewards.gold += gold;
-      }
-    }
-
-    // Enrich item rewards with item names (if ItemsService available)
-    if (rewards.items.length > 0 && this.itemsService) {
-      for (const it of rewards.items) {
-        try {
-          const item = await this.itemsService.findOne(it.itemId);
-          if (item) it.name = item.name;
-        } catch {
-          // ignore - keep id only
-        }
-      }
-    }
-
-    return rewards;
   }
 
   private getActiveEffects(stats: any): string[] {
@@ -519,7 +514,6 @@ export class CombatResultsService {
 
     return { damage };
   }
-
   private async applyRewards(user: User, rewards: any) {
     user.experience += rewards.experience;
     user.gold += rewards.gold;
@@ -540,13 +534,221 @@ export class CombatResultsService {
           // Skip items that don't exist in the database
           console.warn(
             `Skipping item reward - Item ID ${itemReward.itemId} not found:`,
-            error.message,
+            (error as Error)?.message,
           );
         }
       }
     }
 
     await this.usersRepository.save(user);
+  }
+
+  // Calculate rewards per enemy killed. Supports monster-level drop definitions
+  private async calculateRewards(
+    enemies: any[],
+    dungeon: Dungeon,
+    result: string,
+  ) {
+    const rewards: {
+      experience: number;
+      gold: number;
+      items: Array<{ itemId: number; quantity: number; name?: string }>;
+    } = {
+      experience: 0,
+      gold: 0,
+      items: [],
+    };
+
+    if (result === 'victory') {
+      // Only compute experience and gold in aggregated rewards here.
+      // Item drops (monster and dungeon) are handled per-user separately so
+      // that each player's luck is independent. This prevents an aggregated
+      // item pool from being applied to everyone.
+      for (const enemy of enemies) {
+        if (!enemy) continue;
+        const defeated = typeof enemy.hp === 'number' ? enemy.hp <= 0 : false;
+        if (!defeated) continue;
+
+        const exp = Number(
+          enemy.experienceReward ?? dungeon.levelRequirement * 10,
+        );
+        const gold = Number(enemy.goldReward ?? dungeon.levelRequirement * 5);
+        rewards.experience += exp;
+        rewards.gold += gold;
+      }
+      // leave rewards.items empty for aggregated result; per-user items will
+      // be provided in the perUserCombined structure.
+    } else {
+      // Non-victory: small consolation
+      for (const enemy of enemies) {
+        if (!enemy) continue;
+        const exp = Math.floor(
+          (Number(enemy.experienceReward ?? dungeon.levelRequirement * 2) ||
+            0) * 0.2,
+        );
+        const gold = Math.floor(
+          (Number(enemy.goldReward ?? dungeon.levelRequirement * 1) || 0) * 0.2,
+        );
+        rewards.experience += exp;
+        rewards.gold += gold;
+      }
+    }
+
+    // Enrich item rewards with item names (if ItemsService available)
+    if (rewards.items.length > 0 && this.itemsService) {
+      for (const it of rewards.items) {
+        try {
+          const item = await this.itemsService.findOne(it.itemId);
+          if (item) it.name = item.name;
+        } catch (err) {
+          console.warn('Failed to enrich item name for id', it.itemId, err);
+        }
+      }
+    }
+
+    return rewards;
+  }
+
+  /**
+   * Distribute aggregated rewards among a list of users.
+   * - Experience and gold are split as evenly as possible (remainder given to first users)
+   * - Items quantities are distributed round-robin one unit at a time to keep fairness
+   */
+  private distributeRewardsToUsers(
+    rewards: {
+      experience: number;
+      gold: number;
+      items: Array<{ itemId: number; quantity: number; name?: string }>;
+    },
+    users: User[],
+  ) {
+    const userCount = users.length || 0;
+    if (userCount === 0) return [];
+
+    // Initialize per-user reward containers
+    const perUser = Array.from({ length: userCount }, () => ({
+      experience: 0,
+      gold: 0,
+      items: [] as Array<{ itemId: number; quantity: number; name?: string }>,
+    }));
+
+    // Split experience
+    const totalExp = Number(rewards.experience || 0);
+    const baseExp = Math.floor(totalExp / userCount);
+    let expRemainder = totalExp - baseExp * userCount;
+    for (let i = 0; i < userCount; i++) {
+      perUser[i].experience = baseExp + (expRemainder > 0 ? 1 : 0);
+      if (expRemainder > 0) expRemainder--;
+    }
+
+    // Split gold
+    const totalGold = Number(rewards.gold || 0);
+    const baseGold = Math.floor(totalGold / userCount);
+    let goldRemainder = totalGold - baseGold * userCount;
+    for (let i = 0; i < userCount; i++) {
+      perUser[i].gold = baseGold + (goldRemainder > 0 ? 1 : 0);
+      if (goldRemainder > 0) goldRemainder--;
+    }
+
+    // Distribute items round-robin by unit
+    const items = Array.isArray(rewards.items) ? rewards.items : [];
+    for (const it of items) {
+      const itemId = Number(it.itemId);
+      let qty = Math.max(0, Math.floor(Number(it.quantity) || 0));
+      // If qty is zero, treat as 1
+      if (qty === 0) qty = 1;
+
+      let assignIndex = 0;
+      while (qty > 0) {
+        const target = perUser[assignIndex % userCount];
+        const existing = target.items.find((x) => x.itemId === itemId);
+        if (existing) existing.quantity += 1;
+        else target.items.push({ itemId, quantity: 1, name: it.name });
+
+        qty--;
+        assignIndex++;
+      }
+    }
+
+    return perUser;
+  }
+
+  /**
+   * Roll items independently for each user.
+   * For each user:
+   *  - Roll dungeon.dropItems once (per user)
+   *  - For each defeated enemy in `enemies`, roll that enemy's dropItems independently
+   * Returns an array where index corresponds to user index and value is array of item rewards.
+   */
+  private calculatePerUserItemRewards(
+    enemies: Array<any>,
+    dungeon: Dungeon,
+    userCount: number,
+  ) {
+    const perUserItems: Array<
+      Array<{ itemId: number; quantity: number; name?: string }>
+    > = Array.from({ length: userCount }, () => []);
+
+    const processDropListForUser = (
+      drops: any[] | undefined,
+      userIdx: number,
+      isDungeon = false,
+    ) => {
+      if (!Array.isArray(drops)) return;
+      for (const drop of drops) {
+        const dropRate = Number((drop as any).dropRate ?? 0);
+        if (Math.random() < dropRate) {
+          let quantity = 1;
+          if (
+            (drop as any).minQuantity !== undefined &&
+            (drop as any).maxQuantity !== undefined
+          ) {
+            const minQ = Number((drop as any).minQuantity);
+            const maxQ = Number((drop as any).maxQuantity);
+            quantity = Math.floor(Math.random() * (maxQ - minQ + 1)) + minQ;
+          } else if ((drop as any).quantity !== undefined) {
+            quantity = Number((drop as any).quantity) || 1;
+          } else {
+            // Default behaviour: if called for dungeon rolls, assume 1
+            if (isDungeon) quantity = 1;
+            else quantity = Math.floor(Math.random() * 3) + 1;
+          }
+
+          const itemIdNum = Number((drop as any).itemId);
+          const existing = perUserItems[userIdx].find(
+            (it) => it.itemId === itemIdNum,
+          );
+          if (existing) existing.quantity += quantity;
+          else
+            perUserItems[userIdx].push({
+              itemId: itemIdNum,
+              quantity,
+              name: undefined,
+            });
+        }
+      }
+    };
+
+    for (let u = 0; u < userCount; u++) {
+      processDropListForUser(
+        Array.isArray(dungeon.dropItems) ? dungeon.dropItems : [],
+        u,
+        true,
+      );
+
+      for (const enemy of enemies) {
+        if (!enemy) continue;
+        const defeated = typeof enemy.hp === 'number' ? enemy.hp <= 0 : false;
+        if (!defeated) continue;
+
+        const monsterDrops = Array.isArray(enemy.dropItems)
+          ? enemy.dropItems
+          : [];
+        processDropListForUser(monsterDrops as any[], u, false);
+      }
+    }
+
+    return perUserItems;
   }
 
   private async checkAndApplyLevelUp(user: User): Promise<void> {
@@ -588,27 +790,18 @@ export class CombatResultsService {
     }
   }
 
-  // Other existing methods...
-  async findAll() {
+  // Simple repository helpers used by the controller
+  async findAll(): Promise<CombatResult[]> {
+    return this.combatResultsRepository.find();
+  }
+
+  async findOne(id: number): Promise<CombatResult | null> {
+    return this.combatResultsRepository.findOne({ where: { id } });
+  }
+
+  async findByUser(userId: number): Promise<CombatResult[]> {
     return this.combatResultsRepository.find({
-      relations: ['logs'],
-      order: { id: 'DESC' },
+      where: [{ userIds: () => `ARRAY[${userId}]::int[] @> "userIds"` } as any],
     });
-  }
-
-  async findOne(id: number) {
-    return this.combatResultsRepository.findOne({
-      where: { id },
-      relations: ['logs'],
-    });
-  }
-
-  async findByUser(userId: number) {
-    return this.combatResultsRepository
-      .createQueryBuilder('combatResult')
-      .where(':userId = ANY(combatResult.userIds)', { userId })
-      .leftJoinAndSelect('combatResult.logs', 'logs')
-      .orderBy('combatResult.id', 'DESC')
-      .getMany();
   }
 }

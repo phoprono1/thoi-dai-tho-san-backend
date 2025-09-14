@@ -72,6 +72,19 @@ async function startCombatWorker() {
 }
 
 async function bootstrap() {
+  // Global diagnostics: log uncaught errors and process exit to help debugging
+  process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION', err);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION', reason);
+  });
+
+  process.on('exit', (code) => {
+    console.log('process.exit event, code=', code);
+  });
+
   const app = await NestFactory.create(AppModule);
 
   app.enableCors();

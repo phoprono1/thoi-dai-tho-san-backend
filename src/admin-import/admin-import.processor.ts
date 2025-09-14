@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-misused-promises */
+
 /* eslint-disable no-control-regex */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -23,7 +23,6 @@ export async function processImportJob(
 
   async function loadCsvModule(): Promise<any> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const m = require('fast-csv');
       return m && (m.parse ? m : m.default || m);
     } catch (_err) {
