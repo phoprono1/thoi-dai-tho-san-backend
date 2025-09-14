@@ -6,17 +6,40 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import * as fs from 'fs';
-import csv from 'fast-csv';
 import { Logger } from '@nestjs/common';
 import * as path from 'path';
 import * as os from 'os';
 import handlers from './admin-import.handlers';
+import { DataSource } from 'typeorm';
 
 const logger = new Logger('AdminImportProcessor');
 
-export async function processImportJob(job: { id?: string; data: any }) {
+export async function processImportJob(
+  job: { id?: string; data: any },
+  dataSource?: DataSource,
+) {
   const { data } = job as any;
   const { filePath, resource } = data;
+
+  async function loadCsvModule(): Promise<any> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const m = require('fast-csv');
+      return m && (m.parse ? m : m.default || m);
+    } catch (_err) {
+      // dynamic import fallback
+      const imported = await import('fast-csv');
+      return (
+        imported && (imported.parse ? imported : imported.default || imported)
+      );
+    }
+  }
+
+  const csv = await loadCsvModule();
+  if (!csv || typeof csv.parse !== 'function') {
+    logger.error('fast-csv parse() not available; cannot process import');
+    throw new Error('fast-csv parse() not available');
+  }
   if (!filePath || !fs.existsSync(filePath)) {
     logger.error(`Import job ${job.id}: file not found ${filePath}`);
     return { success: false, message: 'file not found' };
@@ -158,17 +181,17 @@ export async function processImportJob(job: { id?: string; data: any }) {
         try {
           let result: any = null;
           if (resource === 'items') {
-            result = await handlers.processItems(rows);
+            result = await handlers.processItems(rows, dataSource);
           } else if (resource === 'monsters') {
-            result = await handlers.processMonsters(rows);
+            result = await handlers.processMonsters(rows, dataSource);
           } else if (resource === 'quests') {
-            result = await handlers.processQuests(rows);
+            result = await handlers.processQuests(rows, dataSource);
           } else if (resource === 'dungeons') {
-            result = await handlers.processDungeons(rows);
+            result = await handlers.processDungeons(rows, dataSource);
           } else if (resource === 'levels') {
-            result = await handlers.processLevels(rows);
+            result = await handlers.processLevels(rows, dataSource);
           } else if (resource === 'character-classes') {
-            result = await handlers.processCharacterClasses(rows);
+            result = await handlers.processCharacterClasses(rows, dataSource);
           } else {
             result = {
               success: false,

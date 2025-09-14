@@ -1,6 +1,6 @@
 import { Controller, Get, Res, Param } from '@nestjs/common';
 import { Response } from 'express';
-import { AppDataSource } from '../data-source';
+import { DataSource } from 'typeorm';
 import { Item } from '../items/item.entity';
 import { Monster } from '../monsters/monster.entity';
 import { Quest } from '../quests/quest.entity';
@@ -11,6 +11,7 @@ import * as csvStringify from 'fast-csv';
 
 @Controller('admin/export')
 export class AdminExportController {
+  constructor(private readonly dataSource: DataSource) {}
   @Get('template/:resource')
   getTemplate(@Param('resource') resource: string, @Res() res: Response) {
     res.setHeader('Content-Type', 'text/csv');
@@ -96,18 +97,14 @@ export class AdminExportController {
   @Get(':resource')
   async exportAll(@Param('resource') resource: string, @Res() res: Response) {
     try {
-      // Ensure the TypeORM DataSource is initialized before calling getRepository.
-      if (!AppDataSource.isInitialized) {
-        // initialize may log; guard with try/catch to avoid double init errors
+      // Ensure the TypeORM DataSource (injected by TypeOrmModule) is initialized
+      if (!this.dataSource.isInitialized) {
         try {
-          // AppDataSource.options are already configured in data-source.ts
-          // Initialize the data source if the application didn't already
-          // initialize it via TypeOrmModule.
-          await AppDataSource.initialize();
+          await this.dataSource.initialize();
         } catch (initErr) {
           // If initialization failed because it was already initialized elsewhere,
           // ignore; otherwise log for debugging.
-          console.warn('AppDataSource.initialize() warning:', String(initErr));
+          console.warn('dataSource.initialize() warning:', String(initErr));
         }
       }
       res.setHeader('Content-Type', 'text/csv');
@@ -120,7 +117,7 @@ export class AdminExportController {
       stream.pipe(res as any);
 
       if (resource === 'items') {
-        const items = await AppDataSource.getRepository(Item).find();
+        const items = await this.dataSource.getRepository(Item).find();
         items.forEach((it) => {
           stream.write({
             id: it.id,
@@ -136,7 +133,7 @@ export class AdminExportController {
           });
         });
       } else if (resource === 'monsters') {
-        const monsters = await AppDataSource.getRepository(Monster).find();
+        const monsters = await this.dataSource.getRepository(Monster).find();
         monsters.forEach((m) => {
           stream.write({
             id: m.id,
@@ -155,7 +152,7 @@ export class AdminExportController {
           });
         });
       } else if (resource === 'quests') {
-        const quests = await AppDataSource.getRepository(Quest).find();
+        const quests = await this.dataSource.getRepository(Quest).find();
         quests.forEach((q) => {
           stream.write({
             id: q.id,
@@ -172,7 +169,7 @@ export class AdminExportController {
           });
         });
       } else if (resource === 'character-classes') {
-        const rows = await AppDataSource.getRepository(CharacterClass).find();
+        const rows = await this.dataSource.getRepository(CharacterClass).find();
         rows.forEach((c) => {
           stream.write({
             id: c.id,
@@ -190,7 +187,7 @@ export class AdminExportController {
           });
         });
       } else if (resource === 'levels') {
-        const rows = await AppDataSource.getRepository(Level).find();
+        const rows = await this.dataSource.getRepository(Level).find();
         rows.forEach((r) => {
           stream.write({
             id: r.id,
@@ -206,7 +203,7 @@ export class AdminExportController {
           });
         });
       } else if (resource === 'dungeons') {
-        const rows = await AppDataSource.getRepository(Dungeon).find();
+        const rows = await this.dataSource.getRepository(Dungeon).find();
         rows.forEach((d) => {
           stream.write({
             id: d.id,

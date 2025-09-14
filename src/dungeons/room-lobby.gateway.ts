@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
@@ -221,7 +220,7 @@ export class RoomLobbyGateway
 
   @SubscribeMessage('joinRoom')
   async handleJoinRoom(
-    @MessageBody() data: { roomId: number; userId: number },
+    @MessageBody() data: { roomId: number; userId: number; password?: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
@@ -229,9 +228,12 @@ export class RoomLobbyGateway
         `[Socket] Client ${client.id} attempting to join room_${data.roomId} for user ${data.userId}`,
       );
 
+      // Forward password (if any) from socket payload to the service so
+      // password-protected rooms behave the same via socket and REST.
       const roomInfo = await this.roomLobbyService.joinRoom(
         data.roomId,
         data.userId,
+        data.password,
       );
 
       // Join the socket room
@@ -339,20 +341,19 @@ export class RoomLobbyGateway
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      // Build job payload: get current room members and dungeonId
-      const roomInfo = await this.roomLobbyService.getRoomInfo(data.roomId);
-      const userIds = (roomInfo?.players || [])
-        .map((p: any) => p.id)
-        .filter(Boolean);
-      const dungeonId = roomInfo?.dungeonId || 1;
+      // Server-side validation: ensure readiness and mark room as STARTING
+      const prep = await this.roomLobbyService.prepareStartCombat(
+        data.roomId,
+        data.userId,
+      );
 
-      // Enqueue combat job to BullMQ worker
+      // Enqueue combat job to BullMQ worker using validated payload
       const job = await combatQueue.add(
         'startCombat',
         {
           roomId: data.roomId,
-          userIds,
-          dungeonId,
+          userIds: prep.userIds,
+          dungeonId: prep.dungeonId,
         },
         {
           removeOnComplete: true,

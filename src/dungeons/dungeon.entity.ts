@@ -29,6 +29,9 @@ export class Dungeon {
   @Column({ nullable: true })
   requiredItem: number; // Item ID needed to unlock
 
+  @Column({ type: 'text', nullable: true })
+  description?: string;
+
   @Column('json', { nullable: true })
   dropItems: { itemId: number; dropRate: number }[]; // Items that can drop with their rates
 

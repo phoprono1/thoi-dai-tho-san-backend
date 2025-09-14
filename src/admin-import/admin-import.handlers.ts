@@ -5,6 +5,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { AppDataSource } from '../data-source';
+import { DataSource } from 'typeorm';
 import { Item } from '../items/item.entity';
 import { ItemType } from '../items/item-types.enum';
 import {
@@ -54,6 +55,7 @@ async function saveInBatches<T>(
   entities: T[],
   batchSize = 200,
   conflictPaths: string[] = ['id'],
+  dataSource?: DataSource,
 ) {
   const results: { success: number; failed: number; errors: any[] } = {
     success: 0,
@@ -64,19 +66,20 @@ async function saveInBatches<T>(
   // Ensure the TypeORM DataSource is initialized. Sometimes the processor
   // runs outside of the Nest TypeOrmModule initialization (for example when
   // run directly via a script), so we guard and initialize here as needed.
-  if (!AppDataSource.isInitialized) {
+  const ds = dataSource || AppDataSource;
+
+  if (!ds.isInitialized) {
     try {
-      // initialize may throw if already initialized in a different context
-      await AppDataSource.initialize();
+      await ds.initialize();
     } catch (initErr) {
       logger.warn(
-        'AppDataSource.initialize() warning in import handler:',
+        'DataSource.initialize() warning in import handler:',
         String(initErr),
       );
     }
   }
 
-  const repo: any = AppDataSource.getRepository<any>(entityClass as any);
+  const repo: any = ds.getRepository<any>(entityClass as any);
 
   for (let i = 0; i < entities.length; i += batchSize) {
     const batch = entities.slice(i, i + batchSize);
@@ -87,7 +90,7 @@ async function saveInBatches<T>(
         await (repo as any).upsert(batch as any, conflictPaths);
       } else {
         // Fallback to manager.save
-        await AppDataSource.manager.save(batch as any);
+        await ds.manager.save(batch as any);
       }
       results.success += batch.length;
     } catch (err) {
@@ -100,7 +103,10 @@ async function saveInBatches<T>(
   return results;
 }
 
-export async function processItems(rows: Record<string, any>[]) {
+export async function processItems(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: Item[] = [];
   const errors: any[] = [];
 
@@ -132,11 +138,20 @@ export async function processItems(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<Item>(Item, entities, 200, ['id']);
+  const res = await saveInBatches<Item>(
+    Item,
+    entities,
+    200,
+    ['id'],
+    dataSource,
+  );
   return { ...res, parseErrors: errors };
 }
 
-export async function processMonsters(rows: Record<string, any>[]) {
+export async function processMonsters(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: Monster[] = [];
   const errors: any[] = [];
 
@@ -169,11 +184,20 @@ export async function processMonsters(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<Monster>(Monster, entities, 200, ['id']);
+  const res = await saveInBatches<Monster>(
+    Monster,
+    entities,
+    200,
+    ['id'],
+    dataSource,
+  );
   return { ...res, parseErrors: errors };
 }
 
-export async function processQuests(rows: Record<string, any>[]) {
+export async function processQuests(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: Quest[] = [];
   const errors: any[] = [];
 
@@ -217,11 +241,20 @@ export async function processQuests(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<Quest>(Quest, entities, 200, ['id']);
+  const res = await saveInBatches<Quest>(
+    Quest,
+    entities,
+    200,
+    ['id'],
+    dataSource,
+  );
   return { ...res, parseErrors: errors };
 }
 
-export async function processDungeons(rows: Record<string, any>[]) {
+export async function processDungeons(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: Dungeon[] = [];
   const errors: any[] = [];
 
@@ -249,11 +282,20 @@ export async function processDungeons(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<Dungeon>(Dungeon, entities, 200, ['id']);
+  const res = await saveInBatches<Dungeon>(
+    Dungeon,
+    entities,
+    200,
+    ['id'],
+    dataSource,
+  );
   return { ...res, parseErrors: errors };
 }
 
-export async function processLevels(rows: Record<string, any>[]) {
+export async function processLevels(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: Level[] = [];
   const errors: any[] = [];
 
@@ -283,11 +325,20 @@ export async function processLevels(rows: Record<string, any>[]) {
     }
   }
 
-  const res = await saveInBatches<Level>(Level, entities, 200, ['id']);
+  const res = await saveInBatches<Level>(
+    Level,
+    entities,
+    200,
+    ['id'],
+    dataSource,
+  );
   return { ...res, parseErrors: errors };
 }
 
-export async function processCharacterClasses(rows: Record<string, any>[]) {
+export async function processCharacterClasses(
+  rows: Record<string, any>[],
+  dataSource?: DataSource,
+) {
   const entities: CharacterClass[] = [];
   const errors: any[] = [];
 
@@ -325,6 +376,7 @@ export async function processCharacterClasses(rows: Record<string, any>[]) {
     entities,
     200,
     ['id'],
+    dataSource,
   );
   return { ...res, parseErrors: errors };
 }

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
@@ -10,7 +11,7 @@ export class AdminImportService {
   private readonly logger = new Logger(AdminImportService.name);
   private queue: any = null;
 
-  constructor() {
+  constructor(private readonly dataSource: DataSource) {
     // Lazy initialize queue when first used to avoid startup issues if BullMQ not configured
   }
 
@@ -81,10 +82,15 @@ export class AdminImportService {
 
       const processor = require('./admin-import.processor');
       // processor.processImportJob expects an object like { id, data }
-      const result = await processor.processImportJob({
-        id: jobId,
-        data: payload,
-      });
+      // Pass the application's DataSource so processor/handlers use the same
+      // connection instead of the standalone AppDataSource.
+      const result = await processor.processImportJob(
+        {
+          id: jobId,
+          data: payload,
+        },
+        this.dataSource,
+      );
       return { jobId, result };
     } catch (err) {
       this.logger.error('Inline import processing failed', err);

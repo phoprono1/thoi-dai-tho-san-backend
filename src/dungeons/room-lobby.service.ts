@@ -119,8 +119,17 @@ export class RoomLobbyService {
   }
 
   async joinRoom(roomId: number, playerId: number, password?: string) {
+    // Masked diagnostics: log presence and lengths only (do NOT log actual password content)
+    const rawIncomingPw = password;
+    const incomingPwTrimmed =
+      typeof password === 'string' ? password.trim() : password;
+
+    const pwInfo = rawIncomingPw
+      ? `[IN_LEN:${rawIncomingPw.length} -> TRIM_LEN:${incomingPwTrimmed ? incomingPwTrimmed.length : 0}]`
+      : '[IN_NOT_PROVIDED]';
+
     console.log(
-      `[JOIN ROOM] Request: roomId=${roomId}, playerId=${playerId}, password=${password ? '[PROVIDED]' : '[NOT PROVIDED]'}`,
+      `[JOIN ROOM] Request: roomId=${roomId}, playerId=${playerId}, passwordInfo=${pwInfo}`,
     );
 
     // Kiểm tra player tồn tại
@@ -149,8 +158,30 @@ export class RoomLobbyService {
       throw new BadRequestException('Phòng không thể tham gia');
     }
 
-    // Kiểm tra mật khẩu nếu phòng private
-    if (room.isPrivate && room.password !== password) {
+    // Kiểm tra mật khẩu nếu phòng private.
+    // Allow the host to join without supplying the password (host should always
+    // be allowed). For other players enforce password equality.
+    // Normalize passwords (trim) before comparison to avoid whitespace mismatch
+    const rawStoredPw = room.password;
+    const storedPw =
+      typeof room.password === 'string' ? room.password.trim() : room.password;
+    const incomingPw =
+      typeof password === 'string' ? password.trim() : password;
+
+    // Log masked stored password info (lengths only) for diagnostics
+    const storedInfo = rawStoredPw
+      ? `[STORED_LEN:${rawStoredPw.length} -> TRIM_LEN:${storedPw ? storedPw.length : 0}]`
+      : '[STORED_NOT_SET]';
+
+    const incomingInfo = rawIncomingPw
+      ? `[IN_LEN:${rawIncomingPw.length} -> TRIM_LEN:${incomingPw ? incomingPw.length : 0}]`
+      : '[IN_NOT_PROVIDED]';
+
+    console.log(
+      `[JOIN ROOM] Password check - stored=${storedInfo}, incoming=${incomingInfo}`,
+    );
+
+    if (room.isPrivate && room.hostId !== playerId && storedPw !== incomingPw) {
       throw new BadRequestException('Mật khẩu không đúng');
     }
 
@@ -301,6 +332,29 @@ export class RoomLobbyService {
         p.status === PlayerStatus.JOINED || p.status === PlayerStatus.READY,
     );
 
+    // Diagnostic logs: report counts and player summaries (no sensitive data)
+    console.log(
+      '[PREPARE START] Room: ' +
+        roomId +
+        ' host: ' +
+        hostId +
+        ' status: ' +
+        room.status,
+    );
+    console.log(
+      '[PREPARE START] Active players count: ' + activePlayers.length,
+    );
+    console.log(
+      '[PREPARE START] Active players: ' +
+        JSON.stringify(
+          activePlayers.map((p) => ({
+            id: p.playerId,
+            username: p.player?.username || 'unknown',
+            status: p.status,
+          })),
+        ),
+    );
+
     console.log(
       `[RoomService] Active players: ${activePlayers.length}, Min players: ${room.minPlayers}`,
     );
@@ -373,6 +427,65 @@ export class RoomLobbyService {
     }
   }
 
+  /**
+   * Perform server-side validation and mark the room as STARTING.
+   * This method does not run the combat itself - it only validates and
+   * transitions the room to STARTING so that workers can safely pick up
+   * the job. Throws BadRequestException if validation fails.
+   */
+  async prepareStartCombat(roomId: number, hostId: number) {
+    // Fetch room and players
+    const room = await this.roomLobbyRepository.findOne({
+      where: { id: roomId },
+      relations: ['host', 'dungeon', 'players', 'players.player'],
+    });
+
+    if (!room) {
+      throw new NotFoundException('Phòng không tồn tại');
+    }
+
+    if (room.hostId !== hostId) {
+      throw new BadRequestException('Chỉ host mới có thể bắt đầu');
+    }
+
+    if (room.status !== RoomStatus.WAITING) {
+      throw new BadRequestException('Phòng không thể bắt đầu');
+    }
+
+    const activePlayers = room.players.filter(
+      (p) =>
+        p.status === PlayerStatus.JOINED || p.status === PlayerStatus.READY,
+    );
+
+    if (activePlayers.length < room.minPlayers) {
+      throw new BadRequestException(
+        `Cần ít nhất ${room.minPlayers} người chơi để bắt đầu`,
+      );
+    }
+
+    const playersNotReady = activePlayers.filter(
+      (p) => p.status !== PlayerStatus.READY && p.playerId !== hostId,
+    );
+
+    if (playersNotReady.length > 0) {
+      const notReadyNames = playersNotReady
+        .map((p) => p.player.username)
+        .join(', ');
+      throw new BadRequestException(
+        `Một số người chơi chưa sẵn sàng: ${notReadyNames}`,
+      );
+    }
+
+    // mark room as STARTING so other attempts are prevented
+    room.status = RoomStatus.STARTING;
+    await this.roomLobbyRepository.save(room);
+
+    const userIds = activePlayers.map((p) => p.playerId);
+    const dungeonId = room.dungeonId;
+
+    return { userIds, dungeonId };
+  }
+
   async cancelRoom(roomId: number, hostId: number) {
     const room = await this.roomLobbyRepository.findOne({
       where: { id: roomId },
@@ -412,8 +525,7 @@ export class RoomLobbyService {
           statuses: [PlayerStatus.JOINED, PlayerStatus.READY],
         },
       )
-      .leftJoinAndSelect('players.player', 'player')
-      .where('room.isPrivate = :isPrivate', { isPrivate: false });
+      .leftJoinAndSelect('players.player', 'player');
 
     // By default, exclude cancelled rooms from the public room list.
     // If an explicit status filter is provided, respect it.
@@ -435,9 +547,20 @@ export class RoomLobbyService {
 
     const rooms = await query.getMany();
 
-    // Add currentPlayers count to each room
+    // Add currentPlayers count to each room and remove sensitive fields
     return rooms.map((room) => ({
-      ...room,
+      id: room.id,
+      name: room.name,
+      dungeonId: room.dungeonId,
+      dungeonName: room.dungeon?.name || null,
+      maxPlayers: room.maxPlayers,
+      status: room.status,
+      host: {
+        id: room.host.id,
+        username: room.host.username,
+      },
+      isPrivate: room.isPrivate,
+      // do NOT expose room.password
       currentPlayers: room.players
         ? room.players.filter(
             (p) =>
@@ -445,6 +568,7 @@ export class RoomLobbyService {
               p.status === PlayerStatus.READY,
           ).length
         : 0,
+      createdAt: room.createdAt,
     }));
   }
 
