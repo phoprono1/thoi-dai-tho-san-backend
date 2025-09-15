@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserPower } from './user-power.entity';
 import { computeCombatPowerFromStats } from './computeCombatPower';
@@ -85,5 +85,154 @@ export class UserPowerService {
       }
       offset += users.length;
     }
+  }
+
+  // Leaderboard helpers
+  /**
+   * Get top N users from leaderboard. Returns array of { userId, score, rank }
+   */
+  async getTop(
+    limit = 100,
+  ): Promise<
+    Array<{ userId: number; score: number; rank: number; username?: string }>
+  > {
+    const r = this.redis;
+    if (r) {
+      try {
+        // ZREVRANGE with scores from 0..limit-1
+        const items = await r.zrevrange(
+          'leaderboard:global',
+          0,
+          limit - 1,
+          'WITHSCORES',
+        );
+        const out: Array<{ userId: number; score: number; rank: number }> = [];
+        for (let i = 0; i < items.length; i += 2) {
+          const uid = Number(items[i]);
+          const score = Number(items[i + 1]);
+          out.push({ userId: uid, score, rank: out.length + 1 });
+        }
+        // enrich with usernames in a single batch
+        const ids = out.map((o) => o.userId);
+        if (ids.length > 0) {
+          const users = await this.dataSource.manager.find(User, {
+            where: { id: In(ids) },
+          });
+          const nameById = new Map(users.map((u) => [u.id, u.username]));
+          return out.map((o) => ({
+            ...o,
+            username: nameById.get(o.userId) || null,
+          }));
+        }
+        return out;
+      } catch (err) {
+        this.logger.warn(`Redis leaderboard read failed: ${err?.message}`);
+        // fallthrough to DB
+      }
+    }
+
+    // Fallback: query DB ordered by combatPower desc
+    const rows = await this.userPowerRepo.find({
+      order: { combatPower: 'DESC' },
+      take: limit,
+    });
+
+    const out = rows.map((r, idx) => ({
+      userId: r.userId,
+      score: Number(r.combatPower || 0),
+      rank: idx + 1,
+    }));
+    // enrich with usernames
+    const ids = out.map((o) => o.userId);
+    if (ids.length > 0) {
+      const users = await this.dataSource.manager.find(User, {
+        where: { id: In(ids) },
+      });
+      const nameById = new Map(users.map((u) => [u.id, u.username]));
+      return out.map((o) => ({
+        ...o,
+        username: nameById.get(o.userId) || null,
+      }));
+    }
+    return out;
+  }
+
+  /**
+   * Get leaderboard slice around a user. Returns members with rank and score.
+   */
+  async getAround(
+    userId: number,
+    radius = 5,
+  ): Promise<
+    { userId: number; score: number; rank: number; username?: string }[]
+  > {
+    const r = this.redis;
+    if (r) {
+      try {
+        const rank = await r.zrevrank('leaderboard:global', String(userId));
+        if (rank === null) {
+          // user not in redis set, fallback
+          throw new Error('not-in-redis');
+        }
+        const start = Math.max(0, Number(rank) - radius);
+        const end = Number(rank) + radius;
+        const items = await r.zrevrange(
+          'leaderboard:global',
+          start,
+          end,
+          'WITHSCORES',
+        );
+        const out: Array<{ userId: number; score: number; rank: number }> = [];
+        let currentRank = start + 1; // ranks are 1-based
+        for (let i = 0; i < items.length; i += 2) {
+          const uid = Number(items[i]);
+          const score = Number(items[i + 1]);
+          out.push({ userId: uid, score, rank: currentRank });
+          currentRank += 1;
+        }
+        // enrich with usernames
+        const ids = out.map((o) => o.userId);
+        if (ids.length > 0) {
+          const users = await this.dataSource.manager.find(User, {
+            where: { id: In(ids) },
+          });
+          const nameById = new Map(users.map((u) => [u.id, u.username]));
+          return out.map((o) => ({
+            ...o,
+            username: nameById.get(o.userId) || null,
+          }));
+        }
+        return out;
+      } catch (err) {
+        this.logger.warn(`Redis around read failed: ${err?.message}`);
+        // fallthrough to DB
+      }
+    }
+
+    // DB fallback: load ordered list and pick slice around user
+    const all = await this.userPowerRepo.find({
+      order: { combatPower: 'DESC' },
+    });
+    const idx = all.findIndex((x) => x.userId === userId);
+    const center = idx >= 0 ? idx : 0;
+    const start = Math.max(0, center - radius);
+    const slice = all.slice(start, center + radius + 1);
+    const out = slice.map((r, i) => ({
+      userId: r.userId,
+      score: Number(r.combatPower || 0),
+      rank: start + i + 1,
+    }));
+    const ids = out.map((o) => o.userId);
+    if (ids.length > 0) {
+      const users = await this.dataSource.manager.find(User, {
+        where: { id: In(ids) },
+      });
+      const nameById = new Map(users.map((u) => [u.id, u.username]));
+      return out.map((o) => ({
+        ...o,
+        username: nameById.get(o.userId) || null,
+      }));
+    }
+    return out;
   }
 }
