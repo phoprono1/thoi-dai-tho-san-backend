@@ -16,6 +16,9 @@ export class ShopItem {
   @Column({ type: 'integer' })
   price: number; // price in gold
 
+  @Column({ type: 'integer', default: 1 })
+  quantity: number;
+
   @Column({ type: 'boolean', default: true })
   active: boolean;
 

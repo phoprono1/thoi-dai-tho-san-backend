@@ -19,6 +19,9 @@ export class MarketOffer {
   @Column({ type: 'integer' })
   amount: number;
 
+  @Column({ type: 'integer', default: 1 })
+  quantity: number;
+
   @Column({ type: 'boolean', default: false })
   accepted: boolean;
 

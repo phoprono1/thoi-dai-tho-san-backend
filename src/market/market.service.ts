@@ -15,6 +15,7 @@ import { Mailbox, MailType } from '../mailbox/mailbox.entity';
 import { User } from '../users/user.entity';
 import { Escrow } from './escrow.entity';
 import { MailboxGateway } from '../mailbox/mailbox.gateway';
+import { UserItem } from '../user-items/user-item.entity';
 
 @Injectable()
 export class MarketService {
@@ -33,9 +34,22 @@ export class MarketService {
   ) {}
 
   // Admin-facing: add item to shop
-  async addShopItem(itemId: number, price: number) {
-    const it = this.shopItemRepo.create({ itemId, price, active: true });
+  async addShopItem(itemId: number, price: number, quantity = 1) {
+    const it = this.shopItemRepo.create({
+      itemId,
+      price,
+      active: true,
+      quantity,
+    });
     return this.shopItemRepo.save(it);
+  }
+
+  // Player-facing: list only active shop items
+  async listPublicShopItems() {
+    return this.shopItemRepo.find({
+      where: { active: true },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   // List shop items (for admin UI)
@@ -47,12 +61,31 @@ export class MarketService {
   async removeShopItem(id: number) {
     const it = await this.shopItemRepo.findOne({ where: { id } });
     if (!it) throw new NotFoundException('Shop item not found');
-    it.active = false;
+    // Hard delete for admin remove
+    await this.shopItemRepo.delete({ id });
+    return { message: 'Shop item removed' };
+  }
+
+  async updateShopItem(
+    id: number,
+    price?: number,
+    quantity?: number,
+    active?: boolean,
+  ) {
+    const it = await this.shopItemRepo.findOne({ where: { id } });
+    if (!it) throw new NotFoundException('Shop item not found');
+    if (typeof price === 'number') it.price = price;
+    if (typeof quantity === 'number') it.quantity = quantity;
+    if (typeof active === 'boolean') it.active = active;
+
+    // If quantity set to >0, ensure active true
+    if (typeof quantity === 'number' && quantity > 0) it.active = true;
+
     return this.shopItemRepo.save(it);
   }
 
   // Player buys from admin shop (buy now)
-  async buyFromShop(buyer: User, shopItemId: number) {
+  async buyFromShop(buyer: User, shopItemId: number, quantity = 1) {
     console.log('[MarketService.buyFromShop] start', {
       buyerId: buyer?.id,
       shopItemId,
@@ -78,7 +111,12 @@ export class MarketService {
     if (!shopItem || !shopItem.active)
       throw new NotFoundException('Shop item not found');
 
-    if ((buyer.gold || 0) < shopItem.price)
+    if (quantity <= 0) throw new BadRequestException('Invalid quantity');
+    if ((shopItem.quantity || 0) < quantity)
+      throw new BadRequestException('Not enough stock');
+
+    const totalPrice = shopItem.price * quantity;
+    if ((buyer.gold || 0) < totalPrice)
       throw new BadRequestException('Insufficient gold');
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -86,19 +124,19 @@ export class MarketService {
     await queryRunner.startTransaction();
     try {
       // Deduct gold from buyer using transaction manager
-      buyer.gold = (buyer.gold || 0) - shopItem.price;
+      buyer.gold = (buyer.gold || 0) - totalPrice;
       console.log('[MarketService.buyFromShop] deducting gold', {
         buyerId: buyer.id,
         newGold: buyer.gold,
       });
       await queryRunner.manager.save(User, buyer);
 
-      // Create purchase history within transaction
+      // Create purchase history within transaction (record total price)
       const ph = queryRunner.manager.create(PurchaseHistory, {
         buyerId: buyer.id,
         sellerId: 0, // system
         itemId: shopItem.itemId,
-        price: shopItem.price,
+        price: totalPrice,
       });
       await queryRunner.manager.save(PurchaseHistory, ph);
 
@@ -108,7 +146,7 @@ export class MarketService {
         title: 'Shop purchase',
         content: `Purchased item ${shopItem.itemId}`,
         type: MailType.REWARD,
-        rewards: { items: [{ itemId: shopItem.itemId, quantity: 1 }] },
+        rewards: { items: [{ itemId: shopItem.itemId, quantity }] },
       });
       // Save via transaction manager
       await queryRunner.manager.save(Mailbox, mailEntity);
@@ -116,6 +154,14 @@ export class MarketService {
         mailId: mailEntity.id,
         userId: mailEntity.userId,
       });
+
+      // decrement shop stock
+      shopItem.quantity = (shopItem.quantity || 0) - quantity;
+      if (shopItem.quantity <= 0) {
+        shopItem.active = false;
+        shopItem.quantity = 0;
+      }
+      await queryRunner.manager.save(ShopItem, shopItem);
 
       await queryRunner.commitTransaction();
       console.log('[MarketService.buyFromShop] transaction committed');
@@ -146,23 +192,76 @@ export class MarketService {
   }
 
   // Player lists an item on the black market
-  async createListing(seller: User, itemId: number, price: number) {
-    const listing = this.listingRepo.create({
-      sellerId: seller.id,
-      itemId,
-      price,
-      active: true,
-    });
-    return this.listingRepo.save(listing);
+  async createListing(
+    seller: User,
+    userItemId: number,
+    price: number,
+    quantity = 1,
+  ) {
+    // Reserve items from the specific UserItem row atomically using a transaction
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Load the specific UserItem by id and ensure ownership. Use a pessimistic write lock
+      // to prevent concurrent listings from oversubscribing the same UserItem.
+      const userItem = await queryRunner.manager
+        .createQueryBuilder(UserItem, 'ui')
+        .setLock('pessimistic_write')
+        .where('ui.id = :id', { id: userItemId })
+        .getOne();
+      if (!userItem) throw new NotFoundException('UserItem not found');
+      if (userItem.userId !== seller.id)
+        throw new BadRequestException('Not the owner of the item');
+
+      const available = userItem.quantity || 0;
+      if (available < quantity) {
+        throw new BadRequestException('Not enough items to list');
+      }
+
+      // Decrement the UserItem (reserve units for listing)
+      if (userItem.quantity <= quantity) {
+        // remove the row entirely
+        await queryRunner.manager.delete(UserItem, { id: userItem.id });
+      } else {
+        userItem.quantity = userItem.quantity - quantity;
+        await queryRunner.manager.save(UserItem, userItem);
+      }
+
+      // Create listing pointing to the underlying itemId
+      const listing = queryRunner.manager.create(MarketListing, {
+        sellerId: seller.id,
+        itemId: userItem.itemId,
+        price,
+        quantity,
+        active: true,
+      });
+      const saved = await queryRunner.manager.save(MarketListing, listing);
+
+      await queryRunner.commitTransaction();
+      return saved;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   // Offer flow: buyer places an offer (we don't lock funds here for simplicity, but we'll create offer record)
   // Place an offer and hold funds (deduct buyer gold as an escrow)
-  async placeOffer(buyer: User, listingId: number, amount: number) {
+  async placeOffer(
+    buyer: User,
+    listingId: number,
+    amount: number,
+    quantity = 1,
+  ) {
     const listing = await this.listingRepo.findOne({
       where: { id: listingId, active: true },
     });
     if (!listing) throw new NotFoundException('Listing not found');
+
+    if (quantity <= 0) throw new BadRequestException('Invalid quantity');
 
     if ((buyer.gold || 0) < amount)
       throw new BadRequestException('Insufficient gold to place offer');
@@ -171,6 +270,13 @@ export class MarketService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
+      // Optionally lock buyer row if multiple concurrent placeOffer calls may race on buyer.gold.
+      // We'll lock the buyer row to ensure gold deduction is safe.
+      await queryRunner.manager
+        .createQueryBuilder(User, 'u')
+        .setLock('pessimistic_write')
+        .where('u.id = :id', { id: buyer.id })
+        .getOne();
       // Deduct buyer gold as escrow
       buyer.gold = (buyer.gold || 0) - amount;
       await queryRunner.manager.save(User, buyer);
@@ -180,6 +286,7 @@ export class MarketService {
         listingId,
         buyerId: buyer.id,
         amount,
+        quantity,
         accepted: false,
       });
       const saved = await queryRunner.manager.save(MarketOffer, offer);
@@ -247,6 +354,7 @@ export class MarketService {
 
       // Emit notifications outside the DB transaction (safe now)
       try {
+        // mailboxGateway will send socket events to the user's room
         this.mailboxGateway.emitMailReceived(refundMail.userId, refundMail.id);
         const unread = await this.mailboxService.getUnreadCount(
           refundMail.userId,
@@ -255,7 +363,12 @@ export class MarketService {
       } catch (e) {
         console.error('Failed to emit mailbox notification', e);
       }
-      return { message: 'Offer cancelled and refund queued' };
+
+      // return the listing id so frontend can refresh offers for that listing
+      return {
+        message: 'Offer cancelled and refund queued',
+        listingId: offer.listingId,
+      };
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;
@@ -266,29 +379,55 @@ export class MarketService {
 
   // Seller accepts an offer -> transfer item via mailbox and create history; refund other offers
   async acceptOffer(seller: User, offerId: number) {
-    const offer = await this.offerRepo.findOne({ where: { id: offerId } });
-    if (!offer) throw new NotFoundException('Offer not found');
-
-    const listing = await this.listingRepo.findOne({
-      where: { id: offer.listingId },
-    });
-    if (!listing) throw new NotFoundException('Listing not found');
-    if (listing.sellerId !== seller.id)
-      throw new BadRequestException('Not the seller');
-
+    // We'll perform the accept flow inside a transaction and lock the listing row
+    // with a pessimistic write lock to prevent concurrent accepts that could oversell.
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
+      // Reload and lock the offer row
+      const offer = await queryRunner.manager
+        .createQueryBuilder(MarketOffer, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :id', { id: offerId })
+        .getOne();
+      if (!offer) throw new NotFoundException('Offer not found');
+
+      // Reload and lock the listing row
+      const listing = await queryRunner.manager
+        .createQueryBuilder(MarketListing, 'l')
+        .setLock('pessimistic_write')
+        .where('l.id = :id', { id: offer.listingId })
+        .getOne();
+      if (!listing) throw new NotFoundException('Listing not found');
+      if (listing.sellerId !== seller.id)
+        throw new BadRequestException('Not the seller');
+
       // Mark offer accepted
       offer.accepted = true;
       await queryRunner.manager.save(MarketOffer, offer);
 
-      // Mark listing inactive
-      listing.active = false;
-      await queryRunner.manager.save(MarketListing, listing);
+      // Determine how many units this offer buys
+      const units = offer.quantity || 1;
 
-      // Create purchase history
+      // If offer requests more than available, reject
+      if (units > (listing.quantity || 0)) {
+        throw new BadRequestException(
+          'Offer quantity exceeds available listing quantity',
+        );
+      }
+
+      // Decrement listing quantity by offered units
+      listing.quantity = (listing.quantity || 0) - units;
+
+      // If zero, remove the listing to keep the marketplace clean, otherwise persist the updated quantity
+      if (listing.quantity <= 0) {
+        await queryRunner.manager.delete(MarketListing, { id: listing.id });
+      } else {
+        await queryRunner.manager.save(MarketListing, listing);
+      }
+
+      // Create purchase history (record total amount)
       const ph = queryRunner.manager.create(PurchaseHistory, {
         buyerId: offer.buyerId,
         sellerId: seller.id,
@@ -307,13 +446,17 @@ export class MarketService {
       escrow.released = true;
       await queryRunner.manager.save(Escrow, escrow);
 
-      // Send mail to buyer with item
+      // NOTE: We deliver gold and items via mailbox mails to avoid race conditions
+      // and to let users claim rewards through mailbox. Do NOT directly modify
+      // seller.gold or buyer inventory here (that was causing duplicate transfers).
+
+      // Send mail to buyer with item(s)
       const buyerMail = queryRunner.manager.create(Mailbox, {
         userId: offer.buyerId,
         title: 'Black market purchase',
         content: `You won the offer for item ${listing.itemId}`,
         type: MailType.REWARD,
-        rewards: { items: [{ itemId: listing.itemId, quantity: 1 }] },
+        rewards: { items: [{ itemId: listing.itemId, quantity: units }] },
       });
       await queryRunner.manager.save(Mailbox, buyerMail);
 
@@ -331,30 +474,44 @@ export class MarketService {
       const otherOffers = await queryRunner.manager.find(MarketOffer, {
         where: { listingId: listing.id, accepted: false, cancelled: false },
       });
+
+      // we'll collect refund mails to emit notifications after commit
+      const refundMailsToEmit: Array<{ userId: number; mailId: number }> = [];
+
       for (const o of otherOffers) {
         if (o.id === offer.id) continue;
 
-        // Mark offer cancelled
-        o.cancelled = true;
-        await queryRunner.manager.save(MarketOffer, o);
+        // Only refund offers that now request more units than remain (cannot be satisfied)
+        if ((o.quantity || 1) > (listing.quantity || 0)) {
+          // Mark offer cancelled
+          o.cancelled = true;
+          await queryRunner.manager.save(MarketOffer, o);
 
-        // Mark escrow refunded if present and create mailbox refund
-        const oe = await queryRunner.manager.findOne(Escrow, {
-          where: { offerId: o.id, refunded: false, released: false },
-        });
-        if (oe) {
-          oe.refunded = true;
-          await queryRunner.manager.save(Escrow, oe);
+          // Mark escrow refunded if present and create mailbox refund
+          const oe = await queryRunner.manager.findOne(Escrow, {
+            where: { offerId: o.id, refunded: false, released: false },
+          });
+          if (oe) {
+            oe.refunded = true;
+            await queryRunner.manager.save(Escrow, oe);
+          }
+
+          const refundMail = queryRunner.manager.create(Mailbox, {
+            userId: o.buyerId,
+            title: 'Offer refunded',
+            content: `Your offer on item ${listing.itemId} was not accepted and your funds are refunded`,
+            type: MailType.REWARD,
+            rewards: { gold: o.amount },
+          });
+          const savedRefund = await queryRunner.manager.save(
+            Mailbox,
+            refundMail,
+          );
+          refundMailsToEmit.push({
+            userId: savedRefund.userId,
+            mailId: savedRefund.id,
+          });
         }
-
-        const refundMail = queryRunner.manager.create(Mailbox, {
-          userId: o.buyerId,
-          title: 'Offer refunded',
-          content: `Your offer on item ${listing.itemId} was not accepted and your funds are refunded`,
-          type: MailType.REWARD,
-          rewards: { gold: o.amount },
-        });
-        await queryRunner.manager.save(Mailbox, refundMail);
       }
 
       await queryRunner.commitTransaction();
@@ -376,11 +533,18 @@ export class MarketService {
         this.mailboxGateway.emitUnreadCount(sellerMail.userId, sellerUnread);
 
         // emit refunds for other buyers
-        for (const o of otherOffers) {
-          if (o.id === offer.id) continue;
-          // find the refund mail for this buyer (simple approach: fetch latest unread mail)
-          const unread = await this.mailboxService.getUnreadCount(o.buyerId);
-          this.mailboxGateway.emitUnreadCount(o.buyerId, unread);
+        for (const r of refundMailsToEmit) {
+          try {
+            this.mailboxGateway.emitMailReceived(r.userId, r.mailId);
+            const unread = await this.mailboxService.getUnreadCount(r.userId);
+            this.mailboxGateway.emitUnreadCount(r.userId, unread);
+          } catch (e) {
+            console.error(
+              'Failed to emit refund mailbox notification for user',
+              r.userId,
+              e,
+            );
+          }
         }
       } catch (e) {
         console.error('Failed to emit mailbox notifications', e);
@@ -424,6 +588,23 @@ export class MarketService {
         await queryRunner.manager.save(Mailbox, refundMail);
 
         await queryRunner.commitTransaction();
+
+        // emit mailbox notification for expired offer refund
+        try {
+          this.mailboxGateway.emitMailReceived(
+            refundMail.userId,
+            refundMail.id,
+          );
+          const unread = await this.mailboxService.getUnreadCount(
+            refundMail.userId,
+          );
+          this.mailboxGateway.emitUnreadCount(refundMail.userId, unread);
+        } catch (e) {
+          console.error(
+            'Failed to emit mailbox notification for expired offer',
+            e,
+          );
+        }
       } catch (err) {
         await queryRunner.rollbackTransaction();
         // swallow individual errors and continue expiring others
@@ -447,8 +628,9 @@ export class MarketService {
   }
 
   async listOffersForListing(listingId: number) {
+    // Exclude cancelled offers so users can re-offer and UI stays clean
     return this.offerRepo.find({
-      where: { listingId },
+      where: { listingId, cancelled: false },
       order: { createdAt: 'DESC' },
     });
   }

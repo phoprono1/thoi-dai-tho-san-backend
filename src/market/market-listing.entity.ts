@@ -23,6 +23,9 @@ export class MarketListing {
   @Column({ type: 'integer' })
   itemId: number;
 
+  @Column({ type: 'integer', default: 1 })
+  quantity: number;
+
   @Column({ type: 'integer' })
   price: number;
 

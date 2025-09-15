@@ -351,8 +351,8 @@ export class QuestService {
 
     if (allCompleted) {
       // If quest requires collected items, verify user actually has them
-      // and deduct them before marking completed. If any required item
-      // is missing or insufficient, abort completion.
+      // before marking completed. Do NOT deduct here: deduction occurs
+      // when the user claims the reward to make the flow: Start -> Check -> Claim
       if (
         quest.requirements?.collectItems &&
         quest.requirements.collectItems.length > 0
@@ -363,7 +363,7 @@ export class QuestService {
           have: number;
         }> = [];
 
-        // First pass: verify all required items exist in user's inventory
+        // Verify all required items exist in user's inventory
         for (const itemReq of quest.requirements.collectItems) {
           try {
             const userItem = await this.userItemsService.findByUserAndItem(
@@ -390,7 +390,6 @@ export class QuestService {
 
         if (missing.length > 0) {
           // Do not mark quest completed if any required item is missing
-          // Additionally fetch and log the full user inventory to aid debugging
           try {
             const inventory = await this.userItemsService.findByUserId(userId);
             console.warn(
@@ -418,42 +417,11 @@ export class QuestService {
           }
           return false;
         }
-
-        // Second pass: deduct required items from user inventory
-        for (const itemReq of quest.requirements.collectItems) {
-          try {
-            const removed = await this.userItemsService.removeItemFromUser(
-              userId,
-              Number(itemReq.itemId),
-              Number(itemReq.quantity),
-            );
-            if (!removed) {
-              // If removal failed for any reason, abort completion (no transactional rollback here)
-              console.error(
-                'Failed to remove required quest items for completion',
-                {
-                  userId,
-                  questId,
-                  itemId: itemReq.itemId,
-                  quantity: itemReq.quantity,
-                },
-              );
-              return false;
-            }
-          } catch (error) {
-            console.error(
-              'Error removing required quest item during completion',
-              error,
-            );
-            return false;
-          }
-        }
       }
 
       // Mark as completed and persist; do NOT apply rewards here. Rewards
-      // are applied only when the player explicitly claims them to keep the
-      // flow linear: Start -> Check -> Claim. Also mark rewardsClaimed=false
-      // so claim can apply rewards exactly once.
+      // are applied when the player explicitly claims them. Also mark
+      // rewardsClaimed=false so claim can apply rewards exactly once.
       userQuest.status = QuestStatus.COMPLETED;
       userQuest.completedAt = new Date();
       userQuest.completionCount = (userQuest.completionCount || 0) + 1;
@@ -588,6 +556,91 @@ export class QuestService {
       try {
         const quest = userQuest.quest;
         if (quest) {
+          // If quest requires collected items, attempt to deduct them now
+          if (
+            quest.requirements?.collectItems &&
+            quest.requirements.collectItems.length > 0
+          ) {
+            const missing: Array<{
+              itemId: number;
+              required: number;
+              have: number;
+            }> = [];
+
+            // Verify availability first
+            for (const itemReq of quest.requirements.collectItems) {
+              try {
+                const userItem = await this.userItemsService.findByUserAndItem(
+                  userId,
+                  Number(itemReq.itemId),
+                );
+                const haveQty = userItem?.quantity || 0;
+                if (haveQty < Number(itemReq.quantity)) {
+                  missing.push({
+                    itemId: Number(itemReq.itemId),
+                    required: Number(itemReq.quantity),
+                    have: haveQty,
+                  });
+                }
+              } catch {
+                missing.push({
+                  itemId: Number(itemReq.itemId),
+                  required: Number(itemReq.quantity),
+                  have: 0,
+                });
+              }
+            }
+
+            if (missing.length > 0) {
+              // Abort claim: inform client that items are missing
+              return {
+                message: 'Missing required items for quest claim',
+                user: null,
+                userQuest,
+                userItems: [],
+              };
+            }
+
+            // Deduct items
+            for (const itemReq of quest.requirements.collectItems) {
+              try {
+                const removed = await this.userItemsService.removeItemFromUser(
+                  userId,
+                  Number(itemReq.itemId),
+                  Number(itemReq.quantity),
+                );
+                if (!removed) {
+                  console.error(
+                    'Failed to remove required quest items during claim',
+                    {
+                      userId,
+                      userQuestId,
+                      itemId: itemReq.itemId,
+                      quantity: itemReq.quantity,
+                    },
+                  );
+                  return {
+                    message: 'Failed to remove required quest items',
+                    user: null,
+                    userQuest,
+                    userItems: [],
+                  };
+                }
+              } catch (err) {
+                console.error(
+                  'Error removing required quest item during claim',
+                  err,
+                );
+                return {
+                  message: 'Error removing required quest items',
+                  user: null,
+                  userQuest,
+                  userItems: [],
+                };
+              }
+            }
+          }
+
           await this.applyQuestRewards(userId, quest);
         }
 
@@ -773,6 +826,7 @@ export class QuestService {
       dungeonId?: number;
       enemyKills?: { enemyType: string; count: number }[];
       bossDefeated?: boolean;
+      collectedItems?: { itemId: number; quantity: number }[];
     },
   ): Promise<void> {
     // Check if this combat result was already processed for quests
@@ -794,6 +848,43 @@ export class QuestService {
       return;
     }
 
+    // Debug: log incoming combat and basic metadata to help diagnose
+    try {
+      const createdAtStr =
+        combatResult.createdAt instanceof Date
+          ? combatResult.createdAt.toISOString()
+          : String(combatResult.createdAt);
+
+      this.logger.debug(
+        `updateQuestProgressFromCombat: userId=${userId} combatResultId=${combatResultId} combatCreatedAt=${createdAtStr}`,
+      );
+
+      this.logger.debug('combatData payload: ' + JSON.stringify(combatData));
+
+      const summary = {
+        id: combatResult.id,
+        result: combatResult.result,
+        dungeonId: combatResult.dungeonId,
+        rewardsItems: Array.isArray((combatResult.rewards as any)?.items)
+          ? ((combatResult.rewards as any).items as any[]).length
+          : 0,
+        logsCount: Array.isArray((combatResult as any).logs)
+          ? ((combatResult as any).logs as any[]).length
+          : 0,
+      };
+
+      this.logger.debug('combatResult summary: ' + JSON.stringify(summary));
+    } catch (e) {
+      // Log but do not throw — logging must not break progress flow
+      try {
+        this.logger.debug(
+          'Failed to stringify combat debug data: ' + String(e),
+        );
+      } catch {
+        // last resort: ignore
+      }
+    }
+
     const combatCreatedAt = combatResult.createdAt;
 
     // Get user's active quests
@@ -810,6 +901,17 @@ export class QuestService {
         combatCreatedAt < userQuest.startedAt
       ) {
         // combat predates quest start, don't count it
+        const ca =
+          combatCreatedAt instanceof Date
+            ? combatCreatedAt.toISOString()
+            : String(combatCreatedAt);
+        const sa =
+          userQuest.startedAt instanceof Date
+            ? userQuest.startedAt.toISOString()
+            : String(userQuest.startedAt);
+        this.logger.debug(
+          `Skipping combat ${combatResultId} for userQuest id=${userQuest.id} because combatCreatedAt (${ca}) < startedAt (${sa})`,
+        );
         continue;
       }
       const quest = await this.getQuestById(userQuest.questId);
@@ -879,6 +981,43 @@ export class QuestService {
           userQuest.progress = {
             ...userQuest.progress,
             killEnemies: currentProgress,
+          };
+        }
+      }
+
+      // Update collected items progress (from combat rewards)
+      if (combatData.collectedItems && quest.requirements.collectItems) {
+        const collected = combatData.collectedItems as Array<{
+          itemId: number;
+          quantity: number;
+        }>;
+        const currentProgress = userQuest.progress?.collectItems || [];
+
+        for (const col of collected) {
+          for (const itemReq of quest.requirements.collectItems) {
+            if (Number(itemReq.itemId) === Number(col.itemId)) {
+              const existing = currentProgress.find(
+                (p: any) => Number(p.itemId) === Number(col.itemId),
+              );
+              if (existing) {
+                existing.current =
+                  (existing.current || 0) + Number(col.quantity || 0);
+              } else {
+                currentProgress.push({
+                  itemId: Number(col.itemId),
+                  current: Number(col.quantity || 0),
+                  required: Number(itemReq.quantity),
+                });
+              }
+              progressUpdated = true;
+            }
+          }
+        }
+
+        if (progressUpdated) {
+          userQuest.progress = {
+            ...userQuest.progress,
+            collectItems: currentProgress,
           };
         }
       }
