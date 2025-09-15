@@ -13,8 +13,10 @@ export enum ClassType {
   MAGE = 'mage',
   ARCHER = 'archer',
   ASSASSIN = 'assassin',
-  TANK = 'tank',
-  HEALER = 'healer',
+  PRIEST = 'priest',
+  KNIGHT = 'knight',
+  SUMMONER = 'summoner',
+  NECROMANCER = 'necromancer',
 }
 
 export enum ClassTier {

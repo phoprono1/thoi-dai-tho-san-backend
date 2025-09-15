@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+
 import {
   Controller,
   Get,
@@ -6,6 +9,8 @@ import {
   Param,
   Put,
   Delete,
+  Request,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -15,7 +20,10 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { DungeonsService } from './dungeons.service';
+// No guard here: endpoint supports optional authentication (unauthenticated
+// requests receive full list; authenticated requests receive filtered list)
 import { Dungeon } from './dungeon.entity';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('dungeons')
 @Controller('dungeons')
@@ -30,6 +38,12 @@ export class DungeonsController {
   })
   findAll(): Promise<Dungeon[]> {
     return this.dungeonsService.findAll();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('eligible')
+  async findEligible(@Request() req) {
+    return this.dungeonsService.findAll(req.user.id);
   }
 
   @Get(':id')

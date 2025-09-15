@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Dungeon } from './dungeon.entity';
+import { User } from '../users/user.entity';
 import { MonsterService } from '../monsters/monster.service';
 
 @Injectable()
@@ -13,11 +14,26 @@ export class DungeonsService {
     private monsterService: MonsterService,
   ) {}
 
-  async findAll(): Promise<Dungeon[]> {
+  // If userId is provided, filter out dungeons whose levelRequirement
+  // is greater than the user's current level. If userId is omitted,
+  // return all dungeons (backwards-compatible).
+  async findAll(userId?: number): Promise<Dungeon[]> {
     const dungeons = await this.dungeonsRepository.find();
-    // Temporarily disable populateMonsters to test
-    // return this.populateMonsters(dungeons);
-    return dungeons;
+
+    if (!userId) {
+      return dungeons;
+    }
+
+    // Fetch user entity to determine their current level.
+    const user = await this.dungeonsRepository.manager
+      .getRepository(User)
+      .findOne({ where: { id: userId } });
+    const userLevel = user?.level || 0;
+
+    return dungeons.filter((d) => {
+      const req = Number(d.levelRequirement || 0) || 0;
+      return req <= userLevel;
+    });
   }
 
   async findOne(id: number): Promise<Dungeon | null> {

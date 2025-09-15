@@ -182,10 +182,30 @@ export class QuestService {
       order: { createdAt: 'DESC' },
     });
 
-    return refreshed.filter(
-      (uq) =>
-        !(uq.status === QuestStatus.COMPLETED && uq.rewardsClaimed === true),
-    );
+    // Load user to respect their current level when deciding which
+    // AVAILABLE quests to expose. We still return in-progress and
+    // completed quests regardless of requiredLevel so that players can
+    // continue or claim them even if their level changed since assignment.
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    const userLevel = user?.level || 0;
+
+    return refreshed.filter((uq) => {
+      // Always hide fully completed+claimed quests
+      if (uq.status === QuestStatus.COMPLETED && uq.rewardsClaimed === true)
+        return false;
+
+      // If the quest is AVAILABLE, omit it when the quest requires a
+      // higher level than the user currently has.
+      if (uq.status === QuestStatus.AVAILABLE && uq.quest) {
+        const qReq =
+          uq.quest.requiredLevel ?? uq.quest.dependencies?.requiredLevel ?? 0;
+        const required = Number(qReq) || 0;
+        if (required > userLevel) return false;
+      }
+
+      // Otherwise return the quest (including IN_PROGRESS / COMPLETED unclaimed)
+      return true;
+    });
   }
 
   async startQuest(userId: number, questId: number): Promise<UserQuest> {
