@@ -190,11 +190,6 @@ export class RoomLobbyService {
       throw new BadRequestException('Level không đủ để vào hầm ngục này');
     }
 
-    // Kiểm tra số lượng người chơi
-    if (room.players.length >= room.maxPlayers) {
-      throw new BadRequestException('Phòng đã đầy');
-    }
-
     // Kiểm tra player đã trong phòng chưa
     const existingPlayer = room.players.find((p) => p.playerId === playerId);
     if (
@@ -223,6 +218,11 @@ export class RoomLobbyService {
         where: { id: roomId },
         relations: ['host', 'dungeon', 'players', 'players.player'],
       });
+    }
+
+    // Kiểm tra số lượng người chơi
+    if (room.players.length >= room.maxPlayers) {
+      throw new BadRequestException('Phòng đã đầy');
     }
 
     // Thêm player vào phòng
