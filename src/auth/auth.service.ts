@@ -74,4 +74,23 @@ export class AuthService {
       throw error;
     }
   }
+
+  // Change password for authenticated user. Verifies current password.
+  async changePassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.usersService.findOne(userId);
+    if (!user) throw new Error('User not found');
+
+    const matches = await bcrypt.compare(currentPassword, user.password);
+    if (!matches) throw new Error('Current password is incorrect');
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await this.usersService.update(userId, {
+      password: hashed,
+    } as Partial<any>);
+    return { message: 'Password changed' };
+  }
 }

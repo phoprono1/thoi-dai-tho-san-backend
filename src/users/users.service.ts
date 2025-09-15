@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { User } from './user.entity';
 import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
@@ -15,6 +15,7 @@ export class UsersService {
     private readonly levelsService: LevelsService,
     private readonly userStatsService: UserStatsService,
     private readonly userPowerService: UserPowerService,
+    private readonly dataSource: DataSource,
   ) {}
 
   findAll(): Promise<User[]> {
@@ -58,6 +59,66 @@ export class UsersService {
 
   async remove(id: number): Promise<void> {
     await this.usersRepository.delete(id);
+  }
+
+  /**
+   * Remove a user and related user-scoped data in a transaction.
+   * This attempts to delete rows from tables that reference userId to
+   * avoid orphaned records when DB-level ON DELETE CASCADE is not set.
+   */
+  async removeAccount(id: number): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Order deletes to avoid FK constraint violations where possible.
+      // Delete mailbox, market offers, market listings, purchase_history, escrow
+      await queryRunner.manager.delete('mailbox', { userId: id });
+      await queryRunner.manager.delete('market_offer', { buyerId: id });
+      await queryRunner.manager.delete('market_listing', { sellerId: id });
+      await queryRunner.manager.delete('purchase_history', { buyerId: id });
+      await queryRunner.manager.delete('purchase_history', { sellerId: id });
+      await queryRunner.manager.delete('escrow', { buyerId: id });
+
+      // User items, upgrade logs
+      await queryRunner.manager.delete('upgrade_log', { userId: id });
+      await queryRunner.manager.delete('user_item', { userId: id });
+
+      // User quests, quest tracking
+      await queryRunner.manager.delete('quest_combat_tracking', { userId: id });
+      await queryRunner.manager.delete('user_quests', { userId: id });
+
+      // User stats, stamina, power
+      await queryRunner.manager.delete('user_stat', { userId: id });
+      await queryRunner.manager.delete('user_stamina', { userId: id });
+      await queryRunner.manager.delete('user_power', { userId: id });
+
+      // Guild membership and related references
+      await queryRunner.manager.delete('guild_members', { userId: id });
+      // If user was guild leader, set leaderId to null in guilds
+      await queryRunner.manager.update(
+        'guilds',
+        { leaderId: id },
+        { leaderId: null },
+      );
+
+      // Chat messages, combat logs, pvp players, room_player
+      await queryRunner.manager.delete('chat_messages', { userId: id });
+      await queryRunner.manager.delete('boss_combat_log', { userId: id });
+      await queryRunner.manager.delete('pvp_players', { userId: id });
+      await queryRunner.manager.delete('room_player', { playerId: id });
+
+      // Finally remove the user row
+      await queryRunner.manager.delete('user', { id });
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error('Failed to remove account: ' + (err as Error).message);
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async banUser(id: number): Promise<User> {

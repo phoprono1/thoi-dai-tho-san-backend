@@ -40,6 +40,20 @@ export class AuthController {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     return this.authService.login(req.user);
   }
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @ApiOperation({ summary: 'Đổi mật khẩu của user hiện tại' })
+  async changePassword(
+    @Request() req,
+    @Body() body: { currentPassword: string; newPassword: string },
+  ) {
+    const user = req.user;
+    return this.authService.changePassword(
+      user.id,
+      body.currentPassword,
+      body.newPassword,
+    );
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
