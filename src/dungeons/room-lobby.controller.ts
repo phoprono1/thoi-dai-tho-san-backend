@@ -8,6 +8,8 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { RoomLobbyService } from './room-lobby.service';
+import { UseGuards, Request } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RoomStatus } from './room-lobby.entity';
 
 @ApiTags('room-lobby')
@@ -195,6 +197,30 @@ export class RoomLobbyController {
     @Body() body: { hostId: number },
   ) {
     return this.roomLobbyService.cancelRoom(+roomId, body.hostId);
+  }
+
+  @Post(':roomId/admin-cancel')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Admin: Hủy phòng chờ (bỏ qua quyền host)',
+  })
+  adminCancelRoom(
+    @Param('roomId') roomId: string,
+    @Request() req: { user: { id: number } },
+  ) {
+    // req.user is populated by JwtStrategy
+    const user = req.user;
+    return this.roomLobbyService.adminCancelRoom(+roomId, user.id);
+  }
+
+  @Post('admin/bulk-cancel-empty')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Admin: Hủy hàng loạt những phòng đang trống (0 người)',
+  })
+  adminBulkCancelEmpty(@Request() req: { user: { id: number } }) {
+    const user = req.user;
+    return this.roomLobbyService.adminBulkCancelEmptyRooms(user.id);
   }
 
   @Post(':roomId/invite')

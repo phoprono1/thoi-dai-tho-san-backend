@@ -25,9 +25,13 @@ export function resolveAttack(
     const hpBefore = defender.currentHp ?? defender.stats.maxHp;
 
     // hit chance
+    // Increase baseline from 50 to 65 so hits are more likely by default.
+    // Also raise the minimum cap to reduce extremely low hit rates and allow
+    // a slightly higher maximum to reduce rare misses against high-accuracy
+    // attackers.
     const baseChance =
-      50 + ((attacker.stats.accuracy || 0) - (defender.stats.dodgeRate || 0));
-    const hitChance = Math.min(95, Math.max(5, baseChance));
+      65 + ((attacker.stats.accuracy || 0) - (defender.stats.dodgeRate || 0));
+    const hitChance = Math.min(99, Math.max(20, baseChance));
     const rHit = rng.next();
     if (rHit * 100 >= hitChance) {
       logs.push({

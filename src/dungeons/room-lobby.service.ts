@@ -613,6 +613,84 @@ export class RoomLobbyService {
     return { message: 'Đã hủy phòng' };
   }
 
+  /**
+   * Admin override: cancel a room regardless of host ownership. Requires
+   * the requesting user to be an admin. We accept adminUserId only for audit
+   * (the controller passes req.user.id).
+   */
+  async adminCancelRoom(roomId: number, adminUserId: number) {
+    // Basic admin check: try to load user and ensure isAdmin flag
+    const adminUser = await this.usersRepository.findOne({
+      where: { id: adminUserId },
+    });
+    if (!adminUser || !adminUser.isAdmin) {
+      throw new BadRequestException('Không có quyền admin');
+    }
+
+    const room = await this.roomLobbyRepository.findOne({
+      where: { id: roomId },
+    });
+    if (!room) {
+      throw new NotFoundException('Phòng không tồn tại');
+    }
+
+    // mark all players left
+    await this.roomPlayerRepository.update(
+      { roomId },
+      { status: PlayerStatus.LEFT, leftAt: new Date() },
+    );
+
+    // set room cancelled
+    room.status = RoomStatus.CANCELLED;
+    await this.roomLobbyRepository.save(room);
+
+    return { message: 'Đã hủy phòng (admin override)', roomId };
+  }
+
+  /**
+   * Admin: bulk cancel rooms that currently have 0 active players.
+   * Returns list of cancelled room ids.
+   */
+  async adminBulkCancelEmptyRooms(adminUserId: number) {
+    const adminUser = await this.usersRepository.findOne({
+      where: { id: adminUserId },
+    });
+    if (!adminUser || !adminUser.isAdmin) {
+      throw new BadRequestException('Không có quyền admin');
+    }
+
+    // Find rooms in WAITING or STARTING that have zero active players
+    const rooms = await this.roomLobbyRepository
+      .createQueryBuilder('room')
+      .leftJoinAndSelect('room.players', 'players')
+      .where('room.status IN (:...statuses)', {
+        statuses: [RoomStatus.WAITING, RoomStatus.STARTING],
+      })
+      .getMany();
+
+    const cancelled: number[] = [];
+
+    for (const r of rooms) {
+      const activeCount = (r.players || []).filter(
+        (p) =>
+          p.status === PlayerStatus.JOINED || p.status === PlayerStatus.READY,
+      ).length;
+
+      if (activeCount === 0) {
+        // mark players left (if any) and cancel
+        await this.roomPlayerRepository.update(
+          { roomId: r.id },
+          { status: PlayerStatus.LEFT, leftAt: new Date() },
+        );
+        r.status = RoomStatus.CANCELLED;
+        await this.roomLobbyRepository.save(r);
+        cancelled.push(r.id);
+      }
+    }
+
+    return { cancelled, count: cancelled.length };
+  }
+
   async getRoomList(dungeonId?: number, status?: RoomStatus) {
     const query = this.roomLobbyRepository
       .createQueryBuilder('room')

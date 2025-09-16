@@ -461,7 +461,6 @@ export class CombatResultsService {
     const run = runCombat({
       players: playerInputs,
       enemies: enemyInputs,
-      maxTurns: 50,
     });
 
     const originalInternalEnemies = internalEnemies.map((e) => ({ ...e }));
@@ -776,7 +775,6 @@ export class CombatResultsService {
     const run = runCombat({
       players: playerInputs,
       enemies: enemyInputs,
-      maxTurns: 50,
     });
 
     // debug: show seed produced by engine

@@ -5,7 +5,11 @@ import { createRng } from './prng';
 import { resolveAttack } from './resolveAttack';
 
 export function runCombat(params: CombatRunParams): CombatRunResult {
-  const maxTurns = params.maxTurns ?? 50;
+  // By default we run until one side is defeated. If a positive maxTurns is
+  // provided we will cap the combat to that many turns for safety/testing.
+  // Convention: maxTurns <= 0 (or omitted) => unlimited.
+  const maxTurns = typeof params.maxTurns === 'number' ? params.maxTurns : 0;
+  const unlimited = !maxTurns || maxTurns <= 0;
   const rng = createRng(params.seed);
   const seedUsed = (rng as any).seed;
 
@@ -23,7 +27,7 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
   let turn = 1;
 
   while (
-    turn <= maxTurns &&
+    (unlimited || turn <= maxTurns) &&
     enemies.some((e) => (e.currentHp ?? 0) > 0) &&
     players.some((p) => (p.currentHp ?? 0) > 0)
   ) {

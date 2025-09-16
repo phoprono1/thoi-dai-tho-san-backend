@@ -16,6 +16,13 @@ export type ComputeOptions = {
     defense?: number;
     misc?: number;
   };
+  // stacking options: how multiple copies of the same item scale
+  stack?: {
+    // multiplicative coefficient applied per extra stack (default 1.15)
+    coeff?: number;
+    // method of stacking. Currently only 'pow' supported which multiplies by coeff^(q-1)
+    method?: 'pow' | 'linear';
+  };
 };
 
 export function computeCombatPowerFromStats(
@@ -41,6 +48,12 @@ export function computeCombatPowerFromStats(
     ...(opts.weights || {}),
   };
 
+  const stackCfg = {
+    coeff: 1.15,
+    method: 'pow' as 'pow' | 'linear',
+    ...(opts.stack || {}),
+  };
+
   const STR = Math.max(0, userStat.strength || 0);
   const INT = Math.max(0, userStat.intelligence || 0);
   const DEX = Math.max(0, userStat.dexterity || 0);
@@ -59,12 +72,33 @@ export function computeCombatPowerFromStats(
   for (const it of equippedItems) {
     if (!it || !it.item) continue;
     const s = it.item.stats || {};
-    equipAttackFlat += (s.attack || 0) * (it.quantity || 1);
+
+    // If the item is equipped (worn), count only one instance regardless of quantity.
+    // Otherwise treat quantity as the stack size and apply stacking coefficient.
+    const rawQty = Math.max(1, it.quantity || 1);
+    const qty = it.isEquipped ? 1 : rawQty;
+
+    // stacking multiplier: for quantity q > 1, use either linear or pow method
+    let stackMultiplier = 1;
+    if (qty > 1) {
+      if (stackCfg.method === 'linear') {
+        // linear: scale proportionally but apply coeff as extra per stack
+        // total = base * (q * coeff)
+        stackMultiplier = stackCfg.coeff * qty;
+      } else {
+        // pow: total = base * qty * coeff^(qty-1)
+        stackMultiplier = qty * Math.pow(stackCfg.coeff, qty - 1);
+      }
+    } else {
+      stackMultiplier = 1;
+    }
+
+    equipAttackFlat += (s.attack || 0) * stackMultiplier;
     // items currently don't have multiplicative fields in schema; keep attackMult 0
     equipAttackMult += 0;
-    equipHpFlat += (s.hp || 0) * (it.quantity || 1);
+    equipHpFlat += (s.hp || 0) * stackMultiplier;
     equipHpMult += 0;
-    equipDefFlat += (s.defense || 0) * (it.quantity || 1);
+    equipDefFlat += (s.defense || 0) * stackMultiplier;
   }
 
   const baseAttack = userStat.attack || 0;
