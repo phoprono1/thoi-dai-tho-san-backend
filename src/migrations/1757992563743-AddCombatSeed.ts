@@ -5,7 +5,7 @@ export class AddCombatSeed1757992563743 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "combat_result" ADD "seed" character varying`,
+      `ALTER TABLE "combat_result" ADD COLUMN IF NOT EXISTS "seed" character varying`,
     );
   }
 

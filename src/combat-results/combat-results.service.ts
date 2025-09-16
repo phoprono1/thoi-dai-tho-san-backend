@@ -169,8 +169,21 @@ export class CombatResultsService {
       // set to `instanceId` for duplicates; prefer matching instanceId, but
       // fall back to template id (e.id) when appropriate.
       let targetIndex = l.targetIndex;
-      if (typeof targetIndex === 'undefined' && typeof l.targetId !== 'undefined') {
-        const idx = internalEnemies.findIndex((e: any) => (e.instanceId && e.instanceId === l.targetId) || e.id === l.targetId);
+      // Only attempt to resolve numeric targetId -> enemy index when the
+      // engine log indicates the target is an enemy. Some engine logs may
+      // use player ids for self-targeting effects (lifesteal, heal). Those
+      // must not be mapped to enemy indices because numeric ids can collide
+      // between players and enemy instanceIds.
+      if (
+        typeof targetIndex === 'undefined' &&
+        typeof l.targetId !== 'undefined' &&
+        l.targetIsPlayer === false
+      ) {
+        const idx = internalEnemies.findIndex(
+          (e: any) =>
+            (e.instanceId && e.instanceId === l.targetId) ||
+            e.id === l.targetId,
+        );
         if (idx >= 0) targetIndex = idx;
       }
 
@@ -333,6 +346,330 @@ export class CombatResultsService {
       enemies: finalResult.enemies,
       sampleLog: finalResult.logs[0] || 'No logs',
     });
+
+    return finalResult;
+  }
+
+  /**
+   * Run combat for given users against explicit enemy templates.
+   * enemiesTemplates: [{ monsterId: number, count: number }...]
+   */
+  async startCombatWithEnemies(
+    userIds: number[],
+    enemiesTemplates: any[],
+    options?: any,
+  ) {
+    const users = await this.usersRepository.find({
+      where: userIds.map((id) => ({ id })),
+      relations: ['stats'],
+    });
+
+    if (users.length !== userIds.length) {
+      throw new Error('Một số người chơi không tồn tại');
+    }
+
+    // NOTE: stamina is expected to be checked/consumed by caller (e.g., ExploreService)
+    // to avoid double-consuming when enqueuing the job. Do not consume here.
+
+    // Build internalEnemies similar to processTeamCombat but using monster templates
+    const internalEnemies: any[] = [];
+    let instanceCounter = 1;
+    for (const t of enemiesTemplates) {
+      const monster = await this.monstersRepository.findOne({
+        where: { id: t.monsterId },
+      });
+      if (!monster) continue;
+      const count = Math.max(1, Number(t.count) || 1);
+      for (let i = 0; i < count; i++) {
+        internalEnemies.push({
+          id: monster.id,
+          instanceId: instanceCounter++,
+          name: monster.name,
+          hp: monster.baseHp,
+          maxHp: monster.baseHp,
+          attack: monster.baseAttack,
+          defense: monster.baseDefense,
+          level: monster.level,
+          type: monster.type,
+          element: monster.element,
+          experienceReward: monster.experienceReward,
+          goldReward: monster.goldReward,
+          dropItems: monster.dropItems || [],
+        });
+      }
+    }
+
+    // Fallback enemy if none
+    if (internalEnemies.length === 0) {
+      internalEnemies.push({
+        id: 999,
+        name: 'Cương thi',
+        hp: 100,
+        maxHp: 100,
+        attack: 15,
+        defense: 5,
+        level: users[0]?.level || 1,
+        type: 'undead',
+        element: 'dark',
+        experienceReward: 10,
+        goldReward: 5,
+        dropItems: [],
+      });
+    }
+
+    // Prepare player and enemy inputs for engine
+    const playerInputs = users.map((u) => ({
+      id: u.id,
+      name: u.username,
+      isPlayer: true,
+      stats: {
+        maxHp: u.stats.maxHp,
+        attack: u.stats.attack,
+        defense: u.stats.defense,
+        critRate: u.stats.critRate ?? 0,
+        critDamage: u.stats.critDamage ?? 150,
+        lifesteal: u.stats.lifesteal ?? 0,
+        armorPen: u.stats.armorPen ?? 0,
+        dodgeRate: u.stats.dodgeRate ?? 0,
+        accuracy: u.stats.accuracy ?? 0,
+        comboRate: u.stats.comboRate ?? 0,
+        counterRate: u.stats.counterRate ?? 0,
+      },
+      currentHp: u.stats.currentHp,
+    }));
+
+    const enemyInputs = internalEnemies.map((en) => ({
+      id: en.instanceId ?? en.id,
+      name: en.name,
+      isPlayer: false,
+      stats: {
+        maxHp: en.maxHp,
+        attack: en.attack,
+        defense: en.defense,
+        critRate: 0,
+        critDamage: 100,
+        lifesteal: 0,
+        armorPen: 0,
+        dodgeRate: 0,
+        accuracy: 0,
+        comboRate: 0,
+        counterRate: 0,
+      },
+      currentHp: en.hp,
+    }));
+
+    const run = runCombat({
+      players: playerInputs,
+      enemies: enemyInputs,
+      maxTurns: 50,
+    });
+
+    const originalInternalEnemies = internalEnemies.map((e) => ({ ...e }));
+    for (let i = 0; i < internalEnemies.length; i++) {
+      internalEnemies[i].hp =
+        run.finalEnemies[i]?.currentHp ?? internalEnemies[i].hp;
+    }
+
+    const finalTeamStats = {
+      totalHp: users.reduce((sum, user) => sum + user.stats.maxHp, 0),
+      currentHp: run.finalPlayers.reduce(
+        (sum: number, p: any) => sum + (p.currentHp ?? p.stats.maxHp),
+        0,
+      ),
+      members: users.map((user, idx) => ({
+        userId: user.id,
+        username: user.username,
+        hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
+        maxHp: user.stats.maxHp,
+      })),
+    };
+
+    const rewards = await this.calculateRewards(
+      internalEnemies,
+      { levelRequirement: users[0]?.level || 1 } as any,
+      run.result,
+    );
+
+    // Map engine logs directly and build final result similar to startCombat
+    const logs = (run.logs as any[]) || [];
+
+    const finalEnemies = internalEnemies.map((enemy) => ({
+      id: enemy.id,
+      name: enemy.name,
+      hp: enemy.hp,
+      maxHp: enemy.maxHp,
+      level: enemy.level,
+      type: enemy.type,
+      element: enemy.element,
+    }));
+
+    const combatResult = {
+      result: run.result,
+      logs,
+      rewards,
+      teamStats: finalTeamStats,
+      enemies: finalEnemies,
+      internalEnemies,
+      originalEnemies: originalInternalEnemies,
+      seedUsed: (run as any).seedUsed ?? null,
+    } as any;
+
+    // Persist similar to startCombat to get a DB id and apply per-user item rolls & rewards
+    // Normalize engine logs to DB shape (ensure userId is populated for each row)
+    const normalizeAction = (t: string) => {
+      if (!t) return 'attack';
+      const map: Record<string, string> = {
+        attack: 'attack',
+        miss: 'attack',
+        counter: 'attack',
+        combo: 'attack',
+        skill: 'skill',
+        item: 'item',
+        escape: 'escape',
+      };
+      return map[t] ?? 'attack';
+    };
+
+    const normalizedLogs = (logs || []).map((l: any) => {
+      const userId = l.actorIsPlayer
+        ? l.actorId
+        : l.targetIsPlayer
+          ? l.targetId
+          : (users[0]?.id ?? null);
+
+      const effects: string[] = [];
+      if (l.flags) {
+        if (l.flags.crit) effects.push('Chí mạng!');
+        if (l.flags.lifesteal)
+          effects.push(
+            `Hút máu +${Math.round(Number(l.flags.lifesteal) || 0)}`,
+          );
+        if (l.flags.armorPen) effects.push(`Xuyên giáp +${l.flags.armorPen}`);
+        if (l.flags.comboIndex)
+          effects.push(`Liên kích lần ${l.flags.comboIndex}`);
+        if (l.flags.counter) effects.push('Phản kích!');
+        if (l.flags.dodge) effects.push('Né tránh!');
+      }
+
+      let targetIndex = l.targetIndex;
+      if (
+        typeof targetIndex === 'undefined' &&
+        typeof l.targetId !== 'undefined' &&
+        l.targetIsPlayer === false
+      ) {
+        const idx = internalEnemies.findIndex(
+          (e: any) =>
+            (e.instanceId && e.instanceId === l.targetId) ||
+            e.id === l.targetId,
+        );
+        if (idx >= 0) targetIndex = idx;
+      }
+
+      return {
+        turn: l.turn,
+        actionOrder: l.actionOrder,
+        action: normalizeAction(l.type ?? l.action),
+        userId,
+        details: {
+          actor: l.actorIsPlayer ? 'player' : 'enemy',
+          actorName: l.actorName,
+          targetName: l.targetName,
+          targetIndex,
+          damage: l.damage,
+          isCritical: !!l.flags?.crit,
+          isMiss: !!l.flags?.dodge || (l.type ?? l.action) === 'miss',
+          hpBefore: l.hpBefore,
+          hpAfter: l.hpAfter,
+          description: l.description,
+          effects,
+        },
+      };
+    });
+
+    const savedCombat = await this.combatResultsRepository.save({
+      userIds,
+      dungeonId: null, // null indicates wildarea/arena (no dungeon)
+      result: combatResult.result as CombatResultType,
+      duration: 0,
+      rewards: combatResult.rewards,
+      teamStats: {
+        ...finalTeamStats,
+        currentHp: combatResult.teamStats.currentHp,
+        members: combatResult.teamStats.members,
+      },
+      logs: normalizedLogs,
+      seed: combatResult.seedUsed,
+    });
+
+    // Apply per-user rewards if victory
+    if (combatResult.result === 'victory') {
+      const perUserBase = this.distributeRewardsToUsers(
+        {
+          experience: combatResult.rewards.experience,
+          gold: combatResult.rewards.gold,
+          items: [],
+        },
+        users,
+      );
+      const perUserItems = this.calculatePerUserItemRewards(
+        internalEnemies,
+        { dropItems: [] } as any,
+        users.length,
+      );
+      const perUserCombined = perUserBase.map((base: any, idx: number) => ({
+        experience: base.experience,
+        gold: base.gold,
+        items: perUserItems[idx] || [],
+      }));
+
+      // Enrich per-user item entries with item names when possible so UI shows names
+      if (this.itemsService) {
+        for (const userRewards of perUserCombined) {
+          if (!Array.isArray(userRewards.items)) continue;
+          for (const it of userRewards.items) {
+            try {
+              const item = await this.itemsService.findOne(it.itemId);
+              if (item) it.name = item.name;
+            } catch (err) {
+              console.warn('Failed to lookup item name for', it.itemId, err);
+            }
+          }
+        }
+      }
+
+      (combatResult as any).__perUserCombined = perUserCombined;
+
+      for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        const base = perUserBase[i] || { experience: 0, gold: 0, items: [] };
+        const items = perUserItems[i] || [];
+        const rewardForUser = {
+          experience: base.experience,
+          gold: base.gold,
+          items,
+        };
+        await this.applyRewards(user, rewardForUser);
+      }
+    }
+
+    const finalResult = {
+      id: (savedCombat as any)?.id,
+      combatResultId: (savedCombat as any)?.id,
+      result: combatResult.result,
+      duration: 0,
+      rewards: (combatResult as any).__perUserCombined
+        ? users.length === 1
+          ? (combatResult as any).__perUserCombined[0]
+          : {
+              aggregated: combatResult.rewards,
+              perUser: (combatResult as any).__perUserCombined,
+            }
+        : combatResult.rewards,
+      logs: (savedCombat as any)?.logs ?? combatResult.logs,
+      teamStats: combatResult.teamStats,
+      enemies: combatResult.enemies || [],
+      originalEnemies: combatResult.originalEnemies || [],
+    };
 
     return finalResult;
   }

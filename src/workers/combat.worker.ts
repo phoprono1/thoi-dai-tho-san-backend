@@ -27,19 +27,36 @@ async function bootstrapWorker() {
   const worker = new Worker(
     'combat',
     async (job) => {
-      const { roomId, userId } = job.data as any;
-      // Determine participant list from room info or job payload
-      // For now, call startCombat with single user as demo
-      // In production, job should include userIds array and dungeonId
-      const userIds = job.data.userIds || [userId];
-      const dungeonId = job.data.dungeonId || 1;
+      const data = job.data as any;
+      const { roomId } = data;
 
+      // Determine participant list from job payload
+      const userIds = data.userIds || (data.userId ? [data.userId] : []);
+
+      // If job includes explicit enemy templates (wild area), call new helper
+      if (Array.isArray(data.enemies) && data.enemies.length > 0) {
+        // call new service method to run combat with provided enemies
+        const result = await (combatService as any).startCombatWithEnemies(
+          userIds,
+          data.enemies,
+          { source: data.source || 'wildarea' },
+        );
+
+        await redisPub.publish(
+          'combat:result',
+          JSON.stringify({ roomId, jobId: job.id, result }),
+        );
+        return result;
+      }
+
+      // Fallback: existing dungeon flow
+      const dungeonId = data.dungeonId || 1;
       const result = await combatService.startCombat(userIds, dungeonId);
 
       // publish to redis channel
       await redisPub.publish(
         'combat:result',
-        JSON.stringify({ roomId, result }),
+        JSON.stringify({ roomId, jobId: job.id, result }),
       );
 
       return result;

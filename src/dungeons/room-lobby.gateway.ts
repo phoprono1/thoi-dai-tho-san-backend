@@ -1,6 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/no-floating-promises */
-
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -250,11 +248,16 @@ export class RoomLobbyGateway
 
       // Forward password (if any) from socket payload to the service so
       // password-protected rooms behave the same via socket and REST.
-      const roomInfo = await this.roomLobbyService.joinRoom(
+      const joinResult = await this.roomLobbyService.joinRoom(
         data.roomId,
         data.userId,
         data.password,
       );
+
+      // joinResult now includes { roomInfo, affectedRoomIds }
+      const roomInfo = joinResult && (joinResult as any).roomInfo;
+      const affectedRoomIds: number[] =
+        (joinResult && (joinResult as any).affectedRoomIds) || [];
 
       // Join the socket room
       await client.join(`room_${data.roomId}`);
@@ -302,6 +305,19 @@ export class RoomLobbyGateway
 
       // Notify all players in room about the new player
       this.server.to(`room_${data.roomId}`).emit('roomUpdated', roomInfo);
+
+      // Emit updates for any rooms that were affected by atomic removal
+      for (const rid of affectedRoomIds) {
+        try {
+          const info = await this.roomLobbyService.getRoomInfo(rid);
+          this.server.to(`room_${rid}`).emit('roomUpdated', info);
+        } catch (e) {
+          // If room got deleted, emit roomClosed to that room namespace
+          this.server.to(`room_${rid}`).emit('roomClosed', {
+            message: 'Room closed due to host change or no active players',
+          });
+        }
+      }
 
       // Emit explicit acknowledgement to the joining client so frontend can confirm
       try {

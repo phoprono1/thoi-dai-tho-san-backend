@@ -30,6 +30,7 @@ import { AdminImportModule } from './admin-import/admin-import.module';
 import { CommonModule } from './common/common.module';
 import { HealthModule } from './health/health.module';
 import { MarketModule } from './market/market.module';
+import { ExploreModule } from './explore/explore.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { MarketModule } from './market/market.module';
     MonsterModule,
     AdminImportModule,
     MarketModule,
+    ExploreModule,
   ],
   controllers: [AppController],
   providers: [AppService],

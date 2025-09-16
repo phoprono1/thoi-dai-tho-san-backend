@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   RoomLobby,
   RoomPlayer,
@@ -32,6 +32,7 @@ export class RoomLobbyService {
     private usersRepository: Repository<User>,
     @InjectRepository(Dungeon)
     private dungeonsRepository: Repository<Dungeon>,
+    private dataSource: DataSource,
     private combatResultsService: CombatResultsService,
     private userItemsService: UserItemsService,
   ) {}
@@ -150,7 +151,7 @@ export class RoomLobbyService {
     );
 
     // Kiểm tra phòng tồn tại
-    const room = await this.roomLobbyRepository.findOne({
+    let room = await this.roomLobbyRepository.findOne({
       where: { id: roomId },
       relations: ['host', 'dungeon', 'players'],
     });
@@ -195,7 +196,74 @@ export class RoomLobbyService {
       throw new BadRequestException('Level không đủ để vào hầm ngục này');
     }
 
-    // Kiểm tra player đã trong phòng chưa
+    // BEFORE adding the player to the requested room, perform an atomic
+    // transaction to remove the player from any other WAITING rooms. This
+    // prevents ghost membership when a user joins from another client/tab.
+    // The transaction will mark room players as LEFT (soft remove). If a
+    // room becomes empty or its host left, we promote the next joined player
+    // to host or delete/cancel the room per policy.
+
+    // We'll collect any affected roomIds to allow the gateway to emit
+    // updated room states to clients in those rooms.
+    const affectedRoomIds: number[] = [];
+
+    await this.dataSource.transaction(async (manager) => {
+      // Find any roomPlayer records where playerId is present and roomId != target and
+      // the room status is WAITING (only remove from waiting rooms)
+      const otherRoomPlayers = await manager
+        .getRepository(RoomPlayer)
+        .createQueryBuilder('rp')
+        .leftJoinAndSelect('rp.room', 'room')
+        .where('rp.playerId = :playerId', { playerId })
+        .andWhere('rp.roomId != :targetRoomId', { targetRoomId: roomId })
+        .andWhere('room.status = :waiting', { waiting: RoomStatus.WAITING })
+        .getMany();
+
+      for (const rp of otherRoomPlayers) {
+        affectedRoomIds.push(rp.roomId);
+
+        // mark left
+        rp.status = PlayerStatus.LEFT;
+        rp.leftAt = new Date();
+        await manager.getRepository(RoomPlayer).save(rp);
+
+        // Check the room for remaining active players
+        const remaining = await manager.getRepository(RoomPlayer).find({
+          where: { roomId: rp.roomId },
+          order: { joinedAt: 'ASC' },
+        });
+
+        const activeLeft = remaining.filter(
+          (r) =>
+            r.status === PlayerStatus.JOINED || r.status === PlayerStatus.READY,
+        );
+
+        // If host left and there are active players, promote the earliest joined player
+        const roomEntity = await manager.getRepository(RoomLobby).findOne({
+          where: { id: rp.roomId },
+        });
+        if (roomEntity) {
+          if (roomEntity.hostId === playerId) {
+            if (activeLeft.length > 0) {
+              const promote = activeLeft[0];
+              roomEntity.hostId = promote.playerId;
+              await manager.getRepository(RoomLobby).save(roomEntity);
+            } else {
+              // No active players left: delete the room
+              await manager.getRepository(RoomLobby).delete(roomEntity.id);
+            }
+          }
+        }
+      }
+    });
+
+    // Refresh room players after cleanup for checks below
+    const refreshed = await this.roomLobbyRepository.findOne({
+      where: { id: roomId },
+      relations: ['host', 'dungeon', 'players'],
+    });
+    if (refreshed) room = refreshed;
+
     const existingPlayer = room.players.find((p) => p.playerId === playerId);
     if (
       existingPlayer &&
@@ -275,10 +343,12 @@ export class RoomLobbyService {
     roomPlayer.lastSeen = new Date();
     await this.roomPlayerRepository.save(roomPlayer);
 
-    return this.roomLobbyRepository.findOne({
+    const finalRoom = await this.roomLobbyRepository.findOne({
       where: { id: roomId },
       relations: ['host', 'dungeon', 'players', 'players.player'],
     });
+
+    return { roomInfo: finalRoom, affectedRoomIds };
   }
 
   /**
@@ -974,7 +1044,7 @@ export class RoomLobbyService {
     } catch (e) {
       this.logger.warn(
         `postCombatCleanup: failed to fetch roomInfo for ${roomId}: ${
-          (e as any)?.message || e
+          e?.message || e
         }`,
       );
       return null;

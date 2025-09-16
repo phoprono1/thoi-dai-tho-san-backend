@@ -35,18 +35,40 @@ async function startCombatWorker() {
     const worker = new Worker(
       'combat',
       async (job) => {
-        const { roomId, userIds, dungeonId } = job.data as any;
+        const data = job.data as any;
+        const { roomId } = data;
+
+        // Determine participant list from job payload
+        const userIds = data.userIds || (data.userId ? [data.userId] : []);
+
         console.log(
-          `Processing combat job for room ${roomId}, users: ${userIds}, dungeon: ${dungeonId}`,
+          `Processing combat job for room ${roomId}, users: ${userIds}, dungeon: ${data.dungeonId}`,
         );
 
         try {
-          // Use the correct method name from CombatResultsService
+          // If job includes explicit enemy templates (wild area), call new helper
+          if (Array.isArray(data.enemies) && data.enemies.length > 0) {
+            const result = await (combatService as any).startCombatWithEnemies(
+              userIds,
+              data.enemies,
+              { source: data.source || 'wildarea' },
+            );
+
+            await redisPub.publish(
+              'combat:result',
+              JSON.stringify({ roomId, jobId: job.id, result }),
+            );
+            return result;
+          }
+
+          // Fallback: existing dungeon flow
+          const dungeonId = data.dungeonId || 1;
           const result = await combatService.startCombat(userIds, dungeonId);
+
           // Publish result to Redis
           await redisPub.publish(
             'combat:result',
-            JSON.stringify({ roomId, result }),
+            JSON.stringify({ roomId, jobId: job.id, result }),
           );
           return result;
         } catch (error) {

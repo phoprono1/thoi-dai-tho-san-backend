@@ -20,12 +20,12 @@ export class CombatResult {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Dungeon, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Dungeon, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn()
-  dungeon: Dungeon;
+  dungeon?: Dungeon | null;
 
-  @Column()
-  dungeonId: number;
+  @Column({ nullable: true })
+  dungeonId?: number | null;
 
   @Column('json')
   userIds: number[];
