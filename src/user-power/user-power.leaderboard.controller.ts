@@ -18,4 +18,3 @@ export class UserPowerLeaderboardController {
     return this.ups.getAround(uid, r);
   }
 }
-

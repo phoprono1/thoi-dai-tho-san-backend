@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -15,6 +16,7 @@ import { UserStatsService } from '../user-stats/user-stats.service';
 import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { Monster } from '../monsters/monster.entity';
 import { ItemsService } from '../items/items.service';
+import { runCombat } from '../combat-engine/engine';
 
 @Injectable()
 export class CombatResultsService {
@@ -117,7 +119,88 @@ export class CombatResultsService {
       })),
     };
 
+    // Normalize engine logs to DB shape: CombatLog requires userId (the
+    // member involved). For player actions this is the actor, for enemy
+    // actions this should be the target player. We also map details fields
+    // into the expected structure so cascading insert works.
+    const internalEnemies = (combatResult as any).internalEnemies || [];
+
+    const normalizeAction = (t: string) => {
+      // DB enum: 'attack'|'defend'|'skill'|'item'|'escape'
+      if (!t) return 'attack';
+      const map: Record<string, string> = {
+        attack: 'attack',
+        miss: 'attack', // treat miss as an attack with isMiss flag
+        counter: 'attack',
+        combo: 'attack',
+        skill: 'skill',
+        item: 'item',
+        escape: 'escape',
+      };
+      return map[t] ?? 'attack';
+    };
+
+    const normalizedLogs = (combatResult.logs || []).map((l: any) => {
+      // Determine which user the DB's userId field should reference:
+      // - If actor is a player, it's the actor's userId
+      // - Otherwise, for enemy actions we map to the target player userId
+      const userId = l.actorIsPlayer
+        ? l.actorId
+        : l.targetIsPlayer
+          ? l.targetId
+          : (users[0]?.id ?? null);
+
+      const effects: string[] = [];
+      if (l.flags) {
+        if (l.flags.crit) effects.push('Chí mạng!');
+        if (l.flags.lifesteal)
+          effects.push(
+            `Hút máu +${Math.round(Number(l.flags.lifesteal) || 0)}`,
+          );
+        if (l.flags.armorPen) effects.push(`Xuyên giáp +${l.flags.armorPen}`);
+        if (l.flags.comboIndex)
+          effects.push(`Liên kích lần ${l.flags.comboIndex}`);
+        if (l.flags.counter) effects.push('Phản kích!');
+        if (l.flags.dodge) effects.push('Né tránh!');
+      }
+
+      // Compute a frontend-friendly targetIndex when the engine provided only
+      // a targetId. Engine targetId refers to the enemy input `id` which we
+      // set to `instanceId` for duplicates; prefer matching instanceId, but
+      // fall back to template id (e.id) when appropriate.
+      let targetIndex = l.targetIndex;
+      if (typeof targetIndex === 'undefined' && typeof l.targetId !== 'undefined') {
+        const idx = internalEnemies.findIndex((e: any) => (e.instanceId && e.instanceId === l.targetId) || e.id === l.targetId);
+        if (idx >= 0) targetIndex = idx;
+      }
+
+      return {
+        turn: l.turn,
+        actionOrder: l.actionOrder,
+        action: normalizeAction(l.type),
+        userId,
+        details: {
+          actor: l.actorIsPlayer ? 'player' : 'enemy',
+          actorName: l.actorName,
+          targetName: l.targetName,
+          targetIndex,
+          damage: l.damage,
+          isCritical: !!l.flags?.crit,
+          isMiss: !!l.flags?.dodge || l.type === 'miss',
+          hpBefore: l.hpBefore,
+          hpAfter: l.hpAfter,
+          description: l.description,
+          effects,
+        },
+      };
+    });
+
     // Lưu kết quả and capture saved entity (so we have the generated id)
+    // Debug log: ensure seedUsed is present on the engine result before saving
+    console.log(
+      'Debug - seed to persist:',
+      (combatResult as any)?.seedUsed ?? (combatResult as any)?.seed ?? null,
+    );
     const savedCombat = await this.combatResultsRepository.save({
       userIds,
       dungeonId,
@@ -129,7 +212,10 @@ export class CombatResultsService {
         currentHp: combatResult.teamStats.currentHp, // Sử dụng HP sau combat
         members: combatResult.teamStats.members,
       },
-      logs: combatResult.logs,
+      logs: normalizedLogs,
+      // persist the deterministic RNG seed so replays can be reproduced
+      seed:
+        (combatResult as any)?.seedUsed ?? (combatResult as any)?.seed ?? null,
     }); // Cập nhật user stats và rewards
     if (combatResult.result === 'victory') {
       // We want item drops to be independent per player (each player rolls
@@ -231,9 +317,15 @@ export class CombatResultsService {
               perUser: (combatResult as any).__perUserCombined,
             }
         : combatResult.rewards,
-      logs: combatResult.logs,
+      // return the persisted logs (so log entries include DB-generated ids)
+      logs: (savedCombat as any)?.logs ?? combatResult.logs,
       teamStats: combatResult.teamStats,
       enemies: combatResult.enemies || [], // Add enemies data
+      // helpful for frontend initialization (shows original max HP & stats)
+      originalEnemies:
+        (combatResult as any).originalEnemies ||
+        (combatResult as any).internalEnemies ||
+        [],
     };
 
     console.log('Debug - Final combat result structure:', {
@@ -246,45 +338,32 @@ export class CombatResultsService {
   }
 
   private async processTeamCombat(users: User[], dungeon: Dungeon) {
-    const logs: Array<{
-      turn: number;
-      actionOrder: number;
-      action: string;
-      userId: number;
-      details: {
-        actor: string;
-        actorName: string;
-        targetName: string;
-        targetIndex?: number; // For multiple enemies with same name
-        damage: number;
-        hpBefore: number;
-        hpAfter: number;
-        description: string;
-        effects?: string[];
-      };
-    }> = [];
-    let turn = 1;
-    const maxTurns = 50;
-
-    // Khởi tạo trạng thái team với các chỉ số nâng cao
-    const teamMembers = users.map((user) => ({
-      user,
-      hp: user.stats.currentHp,
-      maxHp: user.stats.maxHp,
-      stats: user.stats,
-      // Tối ưu hóa: chỉ lưu những chỉ số có rate > 0
-      activeEffects: this.getActiveEffects(user.stats),
+    // Prepare player inputs
+    const playerInputs = users.map((u) => ({
+      id: u.id,
+      name: u.username,
+      isPlayer: true,
+      stats: {
+        maxHp: u.stats.maxHp,
+        attack: u.stats.attack,
+        defense: u.stats.defense,
+        critRate: u.stats.critRate ?? 0,
+        critDamage: u.stats.critDamage ?? 150,
+        lifesteal: u.stats.lifesteal ?? 0,
+        armorPen: u.stats.armorPen ?? 0,
+        dodgeRate: u.stats.dodgeRate ?? 0,
+        accuracy: u.stats.accuracy ?? 0,
+        comboRate: u.stats.comboRate ?? 0,
+        counterRate: u.stats.counterRate ?? 0,
+      },
+      currentHp: u.stats.currentHp,
     }));
 
-    // Populate enemies from dungeon's monster system
-    const enemies: any[] = [];
-    console.log('Debug - Dungeon monster info:', {
-      id: dungeon.id,
-      name: dungeon.name,
-      monsterIds: dungeon.monsterIds,
-      monsterCounts: dungeon.monsterCounts,
-    });
-
+    // Build enemies and keep internal copy for rewards. Use a unique
+    // instanceId per spawned enemy so engine IDs are unique even when
+    // multiple copies of the same monster template are present.
+    const internalEnemies: any[] = [];
+    let instanceCounter = 1;
     if (
       dungeon.monsterIds &&
       dungeon.monsterCounts &&
@@ -294,14 +373,13 @@ export class CombatResultsService {
         const monster = await this.monstersRepository.findOne({
           where: { id: monsterCount.monsterId },
         });
-        console.log(
-          `Debug - Looking for monster ID ${monsterCount.monsterId}:`,
-          monster ? `Found: ${monster.name}` : 'Not found',
-        );
         if (monster) {
           for (let i = 0; i < monsterCount.count; i++) {
-            enemies.push({
+            internalEnemies.push({
+              // template id (monster type) - used for rewards and display
               id: monster.id,
+              // unique instance id used for engine targeting
+              instanceId: instanceCounter++,
               name: monster.name,
               hp: monster.baseHp,
               maxHp: monster.baseHp,
@@ -317,10 +395,10 @@ export class CombatResultsService {
           }
         }
       }
-    } else {
-      // Fallback: create a default enemy if no monsters defined
-      console.log('Debug - No monsters defined in dungeon, using fallback');
-      enemies.push({
+    }
+
+    if (internalEnemies.length === 0) {
+      internalEnemies.push({
         id: 999,
         name: 'Cương thi',
         hp: 100,
@@ -336,98 +414,75 @@ export class CombatResultsService {
       });
     }
 
-    console.log(`Debug - Final enemies array: ${enemies.length} enemies`);
-    enemies.forEach((enemy, idx) => {
-      console.log(
-        `Enemy ${idx}: ${enemy.name} (${enemy.hp}/${enemy.maxHp} HP, Level ${enemy.level})`,
-      );
+    const enemyInputs = internalEnemies.map((en) => ({
+      // use unique instanceId as engine id so each spawned copy is distinct
+      id: en.instanceId ?? en.id,
+      name: en.name,
+      isPlayer: false,
+      stats: {
+        maxHp: en.maxHp,
+        attack: en.attack,
+        defense: en.defense,
+        critRate: 0,
+        critDamage: 100,
+        lifesteal: 0,
+        armorPen: 0,
+        dodgeRate: 0,
+        accuracy: 0,
+        comboRate: 0,
+        counterRate: 0,
+      },
+      currentHp: en.hp,
+    }));
+
+    // Run engine
+    const run = runCombat({
+      players: playerInputs,
+      enemies: enemyInputs,
+      maxTurns: 50,
     });
 
-    // We'll update enemies info at the end with final HP values
+    // debug: show seed produced by engine
+    console.log('Debug - engine seedUsed:', (run as any)?.seedUsed ?? null);
 
-    while (
-      turn <= maxTurns &&
-      enemies.some((e) => e.hp > 0) &&
-      teamMembers.some((m) => m.hp > 0)
-    ) {
-      // Player attacks
-      for (const member of teamMembers) {
-        if (member.hp <= 0) continue;
+    // Preserve an ORIGINAL copy of internal enemies (initial HP and stats)
+    const originalInternalEnemies = internalEnemies.map((e) => ({ ...e }));
 
-        // Only target alive enemies
-        const aliveEnemies = enemies.filter((e) => e.hp > 0);
-        if (aliveEnemies.length === 0) break;
-
-        const targetEnemy =
-          aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
-
-        // Find original index of target enemy
-        const targetEnemyIndex = enemies.indexOf(targetEnemy);
-
-        const attackResult = this.processPlayerAttack(
-          member,
-          targetEnemy,
-          targetEnemyIndex,
-          turn,
-          logs,
-        );
-
-        if (attackResult) {
-          targetEnemy.hp = Math.max(0, targetEnemy.hp - attackResult.damage);
-        }
-      }
-
-      // Don't remove defeated enemies from array to keep stable indexes
-      // Just let them stay with 0 HP
-
-      // Enemy attacks - only alive enemies attack
-      for (const enemy of enemies) {
-        if (enemy.hp <= 0) continue; // Skip defeated enemies
-
-        const alivePlayers = teamMembers.filter((m) => m.hp > 0);
-        if (alivePlayers.length === 0) break;
-
-        const targetMember =
-          alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
-        const attackResult = this.processEnemyAttack(
-          enemy,
-          targetMember,
-          turn,
-          logs,
-        );
-
-        if (attackResult) {
-          targetMember.hp = Math.max(0, targetMember.hp - attackResult.damage);
-        }
-      }
-
-      turn++;
+    // Update internal enemies HPs from engine result (preserve dropItems etc)
+    for (let i = 0; i < internalEnemies.length; i++) {
+      internalEnemies[i].hp =
+        run.finalEnemies[i]?.currentHp ?? internalEnemies[i].hp;
     }
 
-    // Determine result
-    const aliveEnemiesCount = enemies.filter((e) => e.hp > 0).length;
-    const result = aliveEnemiesCount === 0 ? 'victory' : 'defeat';
-
-    // Calculate rewards based on which enemies were defeated
-    const rewards = await this.calculateRewards(enemies, dungeon, result);
-
-    // Calculate final team stats
+    // Build final teamStats
     const finalTeamStats = {
-      totalHp: teamMembers.reduce((sum, member) => sum + member.maxHp, 0),
-      currentHp: teamMembers.reduce((sum, member) => sum + member.hp, 0),
-      members: teamMembers.map((member) => ({
-        userId: member.user.id,
-        username: member.user.username,
-        hp: member.hp,
-        maxHp: member.maxHp,
+      totalHp: users.reduce((sum, user) => sum + user.stats.maxHp, 0),
+      currentHp: run.finalPlayers.reduce(
+        (sum: number, p: any) => sum + (p.currentHp ?? p.stats.maxHp),
+        0,
+      ),
+      members: users.map((user, idx) => ({
+        userId: user.id,
+        username: user.username,
+        hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
+        maxHp: user.stats.maxHp,
       })),
     };
 
-    // Prepare final enemies state with updated HP values
-    const finalEnemies = enemies.map((enemy) => ({
+    // Calculate rewards using updated internalEnemies
+    const rewards = await this.calculateRewards(
+      internalEnemies,
+      dungeon,
+      run.result,
+    );
+
+    // Map engine logs into older format lightly (store engine logs directly)
+    const logs = (run.logs as any[]) || [];
+
+    const finalEnemies = internalEnemies.map((enemy) => ({
       id: enemy.id,
       name: enemy.name,
-      hp: enemy.hp, // Use current HP after combat
+      hp: enemy.hp,
       maxHp: enemy.maxHp,
       level: enemy.level,
       type: enemy.type,
@@ -435,14 +490,16 @@ export class CombatResultsService {
     }));
 
     return {
-      result,
+      result: run.result,
       logs,
       rewards,
       teamStats: finalTeamStats,
-      enemies: finalEnemies, // Use updated enemies info with current HP
-      // Keep full internal enemy objects for server-side logic (dropItems, rewards)
-      internalEnemies: enemies,
-    };
+      enemies: finalEnemies,
+      internalEnemies,
+      originalEnemies: originalInternalEnemies,
+      // expose the RNG seed used so callers can persist and replay
+      seedUsed: (run as any).seedUsed ?? null,
+    } as any;
   }
 
   private getActiveEffects(stats: any): string[] {

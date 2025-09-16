@@ -1,8 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -18,6 +22,7 @@ import { UserItemsService } from '../user-items/user-items.service';
 
 @Injectable()
 export class RoomLobbyService {
+  private readonly logger = new Logger(RoomLobbyService.name);
   constructor(
     @InjectRepository(RoomLobby)
     private roomLobbyRepository: Repository<RoomLobby>,
@@ -266,12 +271,38 @@ export class RoomLobbyService {
       status: PlayerStatus.JOINED,
     });
 
+    // initialize lastSeen when saving
+    roomPlayer.lastSeen = new Date();
     await this.roomPlayerRepository.save(roomPlayer);
 
     return this.roomLobbyRepository.findOne({
       where: { id: roomId },
       relations: ['host', 'dungeon', 'players', 'players.player'],
     });
+  }
+
+  /**
+   * Update lastSeen for a player in a room. Call this whenever server observes
+   * activity from the player (socket join, ping, REST actions like toggleReady).
+   */
+  async touchPlayer(roomId: number, playerId: number) {
+    try {
+      const roomPlayer = await this.roomPlayerRepository.findOne({
+        where: { roomId, playerId },
+      });
+      if (!roomPlayer) return;
+      roomPlayer.lastSeen = new Date();
+      // If they were previously marked LEFT but now reconnected via socket/REST,
+      // bring them back to JOINED
+      if (roomPlayer.status === PlayerStatus.LEFT) {
+        roomPlayer.status = PlayerStatus.JOINED;
+      }
+      await this.roomPlayerRepository.save(roomPlayer);
+    } catch (e) {
+      this.logger.warn(
+        `touchPlayer failed for room ${roomId} player ${playerId}: ${e?.message || e}`,
+      );
+    }
   }
 
   async leaveRoom(roomId: number, playerId: number) {
@@ -741,6 +772,9 @@ export class RoomLobbyService {
     // Toggle ready status
     roomPlayer.isReady = !roomPlayer.isReady;
 
+    // update lastSeen when toggling ready
+    roomPlayer.lastSeen = new Date();
+
     // Cập nhật status thành READY hoặc JOINED dựa vào isReady
     roomPlayer.status = roomPlayer.isReady
       ? PlayerStatus.READY
@@ -772,7 +806,10 @@ export class RoomLobbyService {
     });
 
     if (roomPlayer) {
-      await this.roomPlayerRepository.remove(roomPlayer);
+      // mark leftAt and status so audit stays consistent instead of hard remove
+      roomPlayer.status = PlayerStatus.LEFT;
+      roomPlayer.leftAt = new Date();
+      await this.roomPlayerRepository.save(roomPlayer);
     }
 
     // Check if room is empty (except host)
@@ -786,6 +823,75 @@ export class RoomLobbyService {
     }
 
     return { message: 'Đã rời khỏi phòng' };
+  }
+
+  /**
+   * Periodic cleanup cron: mark players as LEFT if they have been inactive
+   * for longer than STALE_PLAYER_SECONDS. If a room has no active players
+   * after cleanup, cancel or delete the room.
+   */
+  @Cron('*/60 * * * *') // every minute
+  async cleanupStaleRooms() {
+    const STALE_PLAYER_SECONDS = parseInt(
+      process.env.STALE_PLAYER_SECONDS || '120',
+    ); // default 2 minutes
+    const threshold = new Date(Date.now() - STALE_PLAYER_SECONDS * 1000);
+    this.logger.log(
+      `Running cleanupStaleRooms: threshold=${threshold.toISOString()}`,
+    );
+
+    // Find players who have lastSeen < threshold and still JOINED/READY
+    const stalePlayers = await this.roomPlayerRepository
+      .createQueryBuilder('rp')
+      .where('rp.lastSeen IS NOT NULL')
+      .andWhere('rp.lastSeen < :threshold', { threshold })
+      .andWhere('rp.status IN (:...activeStatuses)', {
+        activeStatuses: [PlayerStatus.JOINED, PlayerStatus.READY],
+      })
+      .getMany();
+
+    for (const p of stalePlayers) {
+      try {
+        this.logger.log(
+          `Marking stale player LEFT: room=${p.roomId} player=${p.playerId} lastSeen=${p.lastSeen}`,
+        );
+        p.status = PlayerStatus.LEFT;
+        p.leftAt = new Date();
+        await this.roomPlayerRepository.save(p);
+
+        // After marking player left, check room for remaining active players
+        const remaining = await this.roomPlayerRepository.find({
+          where: { roomId: p.roomId },
+        });
+        const activeLeft = remaining.filter(
+          (r) =>
+            r.status === PlayerStatus.JOINED || r.status === PlayerStatus.READY,
+        );
+        if (activeLeft.length === 0) {
+          // If host was the one who left, cancel room; otherwise delete empty room
+          const room = await this.roomLobbyRepository.findOne({
+            where: { id: p.roomId },
+          });
+          if (room) {
+            // If room still in IN_COMBAT or STARTING, do not delete/cancel automatically
+            if (room.status === RoomStatus.WAITING) {
+              this.logger.log(
+                `Deleting empty room ${room.id} createdAt=${room.createdAt}`,
+              );
+              await this.roomLobbyRepository.delete(room.id);
+            } else {
+              this.logger.log(
+                `Room ${room.id} in status ${room.status} has no active players; leaving state as-is`,
+              );
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Failed cleaning stale player ${p.id}: ${e?.message || e}`,
+        );
+      }
+    }
   }
 
   async getRoomInfo(roomId: number) {
@@ -839,6 +945,40 @@ export class RoomLobbyService {
       })),
       createdAt: room.createdAt,
     };
+  }
+
+  /**
+   * After a combat result is finalized, reset per-player ready flags back to JOINED,
+   * reset room status to WAITING and return the updated RoomInfo for broadcasting.
+   * This enforces that every combat requires players to Ready again.
+   */
+  async postCombatCleanup(roomId: number) {
+    // Reset players isReady/status
+    await this.roomPlayerRepository.update(
+      { roomId },
+      { isReady: false, status: PlayerStatus.JOINED },
+    );
+
+    // Reset room status to WAITING if it exists
+    const room = await this.roomLobbyRepository.findOne({
+      where: { id: roomId },
+    });
+    if (room) {
+      room.status = RoomStatus.WAITING;
+      await this.roomLobbyRepository.save(room);
+    }
+
+    // Return fresh room info for clients
+    try {
+      return await this.getRoomInfo(roomId);
+    } catch (e) {
+      this.logger.warn(
+        `postCombatCleanup: failed to fetch roomInfo for ${roomId}: ${
+          (e as any)?.message || e
+        }`,
+      );
+      return null;
+    }
   }
 
   async updateDungeon(roomId: number, hostId: number, dungeonId: number) {

@@ -58,6 +58,9 @@ export class CombatResult {
     items?: { itemId: number; quantity: number }[];
   };
 
+  @Column({ nullable: true })
+  seed?: string;
+
   @OneToMany('CombatLog', 'combatResult', { cascade: true })
   logs: any[];
 

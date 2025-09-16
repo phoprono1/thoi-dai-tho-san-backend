@@ -113,4 +113,9 @@ export class RoomPlayer {
 
   @Column({ nullable: true })
   leftAt: Date;
+
+  // Timestamp of the player's last observed activity in this room (socket message,
+  // REST action). Used by server-side cleanup to detect stale/abandoned players.
+  @Column({ type: 'timestamp', nullable: true })
+  lastSeen: Date;
 }

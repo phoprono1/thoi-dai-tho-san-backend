@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/no-floating-promises */
 
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -111,6 +112,25 @@ export class RoomLobbyGateway
                 this.logger.log(
                   `[Redis] combatResult emitted to room_${roomId}`,
                 );
+                // After emitting combat result to clients, perform server-side cleanup
+                // to reset player ready states and room status so every new combat
+                // requires players to Ready again.
+                try {
+                  const updated = await this.roomLobbyService.postCombatCleanup(
+                    roomId as number,
+                  );
+                  if (updated) {
+                    this.server
+                      .to(`room_${roomId}`)
+                      .emit('roomUpdated', updated);
+                  }
+                } catch (e) {
+                  this.logger.warn(
+                    `postCombatCleanup failed for room ${roomId}: ${
+                      (e as any)?.message || e
+                    }`,
+                  );
+                }
               } catch (e) {
                 this.logger.warn(
                   'Failed to parse combat result message: ' +
@@ -249,6 +269,15 @@ export class RoomLobbyGateway
         roomId: data.roomId,
       };
 
+      // Update player's lastSeen timestamp so server-side cleanup knows this
+      try {
+        await this.roomLobbyService.touchPlayer(data.roomId, data.userId);
+      } catch (e) {
+        this.logger.warn(
+          `Failed to touchPlayer for ${data.userId} in room ${data.roomId}: ${e?.message || e}`,
+        );
+      }
+
       // Verify client is in room using allSockets() so counts are adapter-aware.
       try {
         const roomName = `room_${data.roomId}`;
@@ -307,6 +336,22 @@ export class RoomLobbyGateway
     }
   }
 
+  @SubscribeMessage('heartbeat')
+  async handleHeartbeat(
+    @MessageBody() data: { roomId: number; userId: number },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      await this.roomLobbyService.touchPlayer(data.roomId, data.userId);
+      return { success: true };
+    } catch (e) {
+      this.logger.warn(
+        `heartbeat failed for room ${data?.roomId} user ${data?.userId}: ${e?.message || e}`,
+      );
+      return { success: false };
+    }
+  }
+
   @SubscribeMessage('toggleReady')
   async handleToggleReady(
     @MessageBody() data: { roomId: number; userId: number },
@@ -326,12 +371,101 @@ export class RoomLobbyGateway
       // Notify all players in room about the ready state change
       this.server.to(`room_${data.roomId}`).emit('roomUpdated', room);
 
+      // If after this toggle all non-host active players are READY, auto-start the combat
+      try {
+        // Consider active players any player who hasn't LEFT the room.
+        // Coerce enum/status to string for a safe comparison with string literal
+        const activePlayers = room.players.filter(
+          (p) => String(p.status) !== 'LEFT',
+        );
+        // Players not ready are active players (except host) who do not have isReady === true
+        const playersNotReady = activePlayers.filter(
+          (p) => p.id !== room.host.id && p.isReady !== true,
+        );
+
+        if (playersNotReady.length === 0) {
+          // mark room as STARTING using service validation and enqueue job
+          try {
+            const prep = await this.roomLobbyService.prepareStartCombat(
+              data.roomId,
+              room.host.id,
+            );
+
+            const job = await combatQueue.add(
+              'startCombat',
+              {
+                roomId: data.roomId,
+                userIds: prep.userIds,
+                dungeonId: prep.dungeonId,
+              },
+              { removeOnComplete: true, attempts: 3 },
+            );
+
+            this.server
+              .to(`room_${data.roomId}`)
+              .emit('combatEnqueued', { jobId: job.id });
+          } catch (e) {
+            // ignore errors here; toggleReady already succeeded and we'll rely on host/manual start
+            this.logger.warn(
+              'Auto-start attempt failed for room ' +
+                String(data.roomId) +
+                ': ' +
+                ((e as any)?.message || e),
+            );
+          }
+        }
+      } catch (e) {
+        // continue silently on unexpected errors
+      }
+
       return { success: true, roomInfo: room };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       console.error('[TOGGLE READY] Error:', errorMessage);
       return { success: false, error: errorMessage };
+    }
+  }
+
+  @SubscribeMessage('prepareStart')
+  async handlePrepareStart(
+    @MessageBody() data: { roomId: number; userId: number },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      // Verify host
+      const roomInfo = await this.roomLobbyService.getRoomInfo(data.roomId);
+      if (!roomInfo) {
+        return { success: false, error: 'Room not found' };
+      }
+
+      if (roomInfo.host.id !== data.userId) {
+        return { success: false, error: 'Only host can prepare start' };
+      }
+
+      // Broadcast a prepare-to-start event to all players in the room so clients
+      // can show a readiness modal with current ready status
+      try {
+        this.server.to(`room_${data.roomId}`).emit('prepareToStart', roomInfo);
+        // Also emit directly to the requesting client to ensure the host
+        // sees the prepare modal even if their socket hasn't joined the room
+        try {
+          client.emit('prepareToStart', roomInfo);
+        } catch (e) {
+          // ignore
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Failed to emit prepareToStart for room ${data.roomId}: ${e?.message || e}`,
+        );
+      }
+
+      return { success: true };
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Unknown error',
+      };
     }
   }
 

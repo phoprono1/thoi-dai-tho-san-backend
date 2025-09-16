@@ -504,13 +504,7 @@ export class QuestService {
         for (const itemReq of collectReqs) {
           const itemIdNum = Number(itemReq.itemId);
 
-          // If progress already contains this item, skip
-          const existing = collectProgress.find(
-            (p) => Number(p.itemId) === itemIdNum,
-          );
-          if (existing) continue;
-
-          // Look up inventory for this item
+          // Look up inventory for this item (authoritative for "Check")
           const inv = userItems.find(
             (ui) =>
               Number(ui.itemId) === itemIdNum ||
@@ -518,11 +512,22 @@ export class QuestService {
           );
           const haveQty = inv?.quantity || 0;
 
-          collectProgress.push({
-            itemId: itemIdNum,
-            current: haveQty,
-            required: Number(itemReq.quantity),
-          });
+          // If progress already contains this item, override the current
+          // count with the authoritative inventory amount so the UI shows
+          // the real state (handles sold/consumed items).
+          const existing = collectProgress.find(
+            (p) => Number(p.itemId) === itemIdNum,
+          );
+          if (existing) {
+            existing.current = haveQty;
+            existing.required = Number(itemReq.quantity);
+          } else {
+            collectProgress.push({
+              itemId: itemIdNum,
+              current: haveQty,
+              required: Number(itemReq.quantity),
+            });
+          }
         }
 
         userQuest.progress = {

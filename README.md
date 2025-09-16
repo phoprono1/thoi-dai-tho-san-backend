@@ -116,6 +116,61 @@ Make sure to:
 3. Set `NODE_ENV=production`
 4. Configure CORS for your frontend domain
 
+## Production & Migrations (important)
+
+This project now relies on TypeORM migrations for schema changes in non-development environments. A few notes to help you deploy safely:
+
+- TypeORM `synchronize` is enabled only in development. In production the code expects migrations to be applied instead of auto-syncing the schema.
+- There are two ways migrations can be applied when you start the service:
+	- Set `MIGRATIONS_RUN=true` in the environment so TypeORM runs pending migrations automatically when DataSource is initialized.
+	- Or keep `MIGRATIONS_RUN=false` and run the project's migration script explicitly before starting the app. The project's start script (`start.sh`) already runs the migration runner (`run-migrations.js`) by default when building containers.
+
+Recommended environment variables for production:
+
+```env
+NODE_ENV=production
+MIGRATIONS_RUN=false   # control whether TypeORM should auto-run migrations at DataSource init
+STALE_PLAYER_SECONDS=120   # inactivity threshold (seconds) used by the room cleanup cron
+DATABASE_HOST=... 
+DATABASE_PORT=5432
+DATABASE_USERNAME=...
+DATABASE_PASSWORD=...
+DATABASE_NAME=...
+```
+
+How to run migrations locally (examples):
+
+- Using the project script (recommended):
+
+```bash
+# from backend/
+npm run migration:run
+```
+
+- Or after building the project you can run the compiled runner directly:
+
+```bash
+npm run build
+node dist/run-migrations.js
+```
+
+Migration safety note:
+
+- The migration that adds the new presence column (`lastSeen`) backfills existing rows with the current timestamp (NOW()) to avoid immediately treating long-lived rooms as stale. This is intentional and prevents mass deletions on first rollout. If you want older rooms to be considered stale immediately you can run a custom SQL update after the migration to set `lastSeen` to an older timestamp for selected rows.
+
+Heartbeat & stale-room cleanup (what the frontend needs)
+
+- The backend records a `lastSeen` timestamp for players in rooms and runs a cron job that marks players as LEFT if they haven't been seen for longer than `STALE_PLAYER_SECONDS`. Empty WAITING rooms are cleaned up automatically.
+- To keep a player active while they have the room open, the frontend should emit a periodic heartbeat over the room socket:
+
+	- Event: `heartbeat`
+	- Payload: { roomId, userId }
+	- Frequency: ~20–30 seconds (choose less than STALE_PLAYER_SECONDS)
+
+- If the frontend doesn't send heartbeats (for example old clients), the server-side cron will still mark players as LEFT after the threshold and cleanup empty rooms.
+
+If you need help wiring the heartbeat into the frontend socket hook, tell me which file contains your room socket hook and I can add the client-side code for you.
+
 ## Testing
 
 ```bash
