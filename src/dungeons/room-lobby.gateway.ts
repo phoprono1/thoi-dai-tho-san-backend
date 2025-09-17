@@ -259,18 +259,25 @@ export class RoomLobbyGateway
       const affectedRoomIds: number[] =
         (joinResult && (joinResult as any).affectedRoomIds) || [];
 
-      // Join the socket room
-      await client.join(`room_${data.roomId}`);
-      console.log(
-        `[Socket] Client ${client.id} successfully joined room_${data.roomId}`,
-      );
-
-      // Store user data in socket for tracking
+      // Store user data in socket for tracking before joining to avoid races
       client.data = {
         ...client.data,
         userId: data.userId,
         roomId: data.roomId,
       };
+      // Debug: log client.data after assignment to confirm userId/roomId presence
+      try {
+        const dbg = (client.data as any) || {};
+        console.log(`[Socket DEBUG] client.data for ${client.id}:`, dbg);
+      } catch {
+        // ignore debug logging errors
+      }
+
+      // Join the socket room
+      await client.join(`room_${data.roomId}`);
+      console.log(
+        `[Socket] Client ${client.id} successfully joined room_${data.roomId}`,
+      );
 
       // Update player's lastSeen timestamp so server-side cleanup knows this
       try {
@@ -646,6 +653,114 @@ export class RoomLobbyGateway
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
+    }
+  }
+
+  @SubscribeMessage('roomChat')
+  async handleRoomChat(
+    @MessageBody()
+    data: { roomId?: number; username?: string; text?: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      // Debug: incoming payload (short snippet)
+      try {
+        const snippet =
+          typeof data?.text === 'string' ? data.text.slice(0, 200) : data?.text;
+        this.logger.log(
+          `[roomChat RECEIVED] client=${client.id} data=${JSON.stringify({ roomId: data?.roomId, username: data?.username, text: snippet })}`,
+        );
+      } catch (_err) {
+        // ignore logging errors
+      }
+
+      const roomId = data?.roomId;
+      const text = typeof data?.text === 'string' ? data.text.trim() : '';
+
+      if (!roomId || !text) {
+        return { success: false, error: 'Invalid payload' };
+      }
+
+      // Basic validation: limit message length to avoid abuse
+      if (text.length > 1000) {
+        return { success: false, error: 'Message too long' };
+      }
+
+      // Debug: inspect client.data to ensure userId/roomId are set
+      try {
+        const cdata = (client.data as any) || {};
+        this.logger.log(
+          `[roomChat DEBUG] client.data for ${client.id}: ${JSON.stringify(cdata)}`,
+        );
+      } catch (logErr) {
+        this.logger.warn('[roomChat DEBUG] failed to stringify client.data');
+      }
+
+      // Verify client is in the room (adapter-aware). Use allSockets()
+      // which works correctly with adapters (Redis) and across processes.
+      const roomName = `room_${roomId}`;
+      let isMember = false;
+      try {
+        const socketIdSet = await this.server.in(roomName).allSockets();
+        isMember = socketIdSet ? socketIdSet.has(client.id) : false;
+      } catch (e) {
+        // Fallback to adapter map if allSockets() isn't supported for some reason
+        const roomSet =
+          this.server?.sockets?.adapter?.rooms?.get(roomName) || new Set();
+        isMember = roomSet.has(client.id);
+      }
+
+      // allow emit if client is present in room; otherwise deny
+      if (!isMember) {
+        this.logger.warn(
+          `Client ${client.id} tried to send roomChat to ${roomName} but is not a member`,
+        );
+        return { success: false, error: 'Not a member of room' };
+      }
+
+      const username =
+        typeof data.username === 'string' && data.username
+          ? data.username
+          : (client.data as any)?.username || 'Anon';
+
+      // Preserve client-provided cid (if any) so frontends can dedupe optimistic messages
+      const incomingCid =
+        typeof (data as any)?.cid === 'string' ? (data as any).cid : undefined;
+
+      const payload: any = {
+        roomId,
+        username,
+        text,
+        ts: Date.now(),
+        senderSocketId: client.id,
+      };
+
+      if (incomingCid) payload.cid = incomingCid;
+
+      // Debug: log payload and intended recipients
+      try {
+        const socketIdSet = await this.server.in(roomName).allSockets();
+        const socketIds = Array.from(socketIdSet || []);
+        this.logger.log(
+          `[roomChat] from ${client.id} -> room ${roomId}, payload=${JSON.stringify({ username, text: text.slice(0, 200) })}, recipients=${socketIds.length}`,
+        );
+      } catch (e) {
+        // ignore
+      }
+
+      // Broadcast to all clients in the room
+      try {
+        this.server.to(roomName).emit('roomChat', payload);
+      } catch (e) {
+        this.logger.warn(
+          `Failed to emit roomChat: ${(e as any)?.message || e}`,
+        );
+      }
+
+      return { success: true };
+    } catch (e) {
+      this.logger.warn(`roomChat handler error: ${(e as any)?.message || e}`);
+      return { success: false, error: 'Internal error' };
     }
   }
 }
