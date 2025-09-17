@@ -1042,7 +1042,7 @@ export class RoomLobbyService {
     }
   }
 
-  async getRoomInfo(roomId: number) {
+  async getRoomInfo(roomId: number, includeLeft: boolean = false) {
     // Get room with basic info only (no dungeon relation)
     const room = await this.roomLobbyRepository
       .createQueryBuilder('room')
@@ -1065,6 +1065,17 @@ export class RoomLobbyService {
       order: { joinedAt: 'ASC' },
     });
 
+    // By default we only expose "active" players to clients (JOINED/READY).
+    // This avoids UI confusion where players marked LEFT (soft-removed) still
+    // appear in room listings. Callers can pass includeLeft=true to receive
+    // the full audit list when needed.
+    const visiblePlayers = includeLeft
+      ? players
+      : players.filter(
+          (p) =>
+            p.status === PlayerStatus.JOINED || p.status === PlayerStatus.READY,
+        );
+
     console.log('[GET ROOM INFO DEBUG]', {
       roomId,
       dungeonId: room.dungeonId,
@@ -1084,7 +1095,7 @@ export class RoomLobbyService {
         id: room.host.id,
         username: room.host.username,
       },
-      players: players.map((p) => ({
+      players: visiblePlayers.map((p) => ({
         id: p.player.id,
         username: p.player.username,
         status: p.status,
