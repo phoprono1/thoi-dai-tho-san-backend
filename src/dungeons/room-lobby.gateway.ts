@@ -460,13 +460,19 @@ export class RoomLobbyGateway
       }
 
       // Broadcast a prepare-to-start event to all players in the room so clients
-      // can show a readiness modal with current ready status
+      // can show a readiness modal with current ready status. Filter out any
+      // players already marked LEFT so clients don't count departed players.
       try {
-        this.server.to(`room_${data.roomId}`).emit('prepareToStart', roomInfo);
+        const filteredRoomInfo = {
+          ...roomInfo,
+          players: (roomInfo.players || []).filter((p: any) => String(p.status) !== 'LEFT'),
+        };
+
+        this.server.to(`room_${data.roomId}`).emit('prepareToStart', filteredRoomInfo);
         // Also emit directly to the requesting client to ensure the host
         // sees the prepare modal even if their socket hasn't joined the room
         try {
-          client.emit('prepareToStart', roomInfo);
+          client.emit('prepareToStart', filteredRoomInfo);
         } catch (e) {
           // ignore
         }
