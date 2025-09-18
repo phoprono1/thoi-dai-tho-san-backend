@@ -1,9 +1,16 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-base-to-string */
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
+import { guildEvents } from './guild.events';
+import { GuildInvitePayload } from './guild.events';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -16,9 +23,13 @@ import {
   GuildEventStatus,
 } from './guild.entity';
 import { User } from '../users/user.entity';
+import { Inject } from '@nestjs/common';
+import { REDIS_CLIENT } from '../common/redis.provider';
+import Redis from 'ioredis';
 
 @Injectable()
 export class GuildService {
+  private readonly logger = new Logger(GuildService.name);
   constructor(
     @InjectRepository(Guild)
     private guildRepository: Repository<Guild>,
@@ -28,6 +39,7 @@ export class GuildService {
     private guildEventRepository: Repository<GuildEvent>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @Inject(REDIS_CLIENT) private readonly redisClient?: Redis,
   ) {}
 
   // Tạo công hội mới
@@ -36,51 +48,161 @@ export class GuildService {
     name: string,
     description?: string,
   ): Promise<Guild> {
-    // Kiểm tra người dùng đã có công hội chưa
-    const existingMember = await this.guildMemberRepository.findOne({
-      where: { userId },
-    });
+    // We need an atomic operation: deduct 10_000 gold from the creator and create
+    // the guild & leader member in a single transaction to avoid money-loss or
+    // inconsistent state when errors occur.
+    const queryRunner =
+      this.guildRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Check if user already member (use transaction manager)
+      const existingMember = await queryRunner.manager.findOne(GuildMember, {
+        where: { userId },
+      });
+      if (existingMember) {
+        throw new BadRequestException(
+          'Bạn đã là thành viên của một công hội khác',
+        );
+      }
 
-    if (existingMember) {
-      throw new BadRequestException(
-        'Bạn đã là thành viên của một công hội khác',
+      // Check duplicate guild name
+      const existingGuild = await queryRunner.manager.findOne(Guild, {
+        where: { name },
+      });
+      if (existingGuild) {
+        throw new BadRequestException('Tên công hội đã tồn tại');
+      }
+
+      const userTable = this.userRepository.metadata.tableName;
+      // Lock the user row and read current gold using FOR UPDATE to avoid races
+      const res: Array<{ id: number; gold: number }> =
+        await queryRunner.manager.query(
+          `SELECT id, gold FROM "${userTable}" WHERE id = $1 FOR UPDATE`,
+          [userId],
+        );
+      if (!res || res.length === 0) {
+        throw new NotFoundException('Người dùng không tồn tại');
+      }
+      const currentGold = Number(res[0].gold ?? 0);
+      const cost = 10000;
+      if (currentGold < cost) {
+        throw new BadRequestException('Bạn cần 10.000 vàng để tạo công hội');
+      }
+
+      // Deduct gold from user
+      const newGold = currentGold - cost;
+      await queryRunner.manager.query(
+        `UPDATE "${userTable}" SET "gold" = $1 WHERE id = $2`,
+        [newGold, userId],
+      );
+
+      // Create guild
+      const guild = queryRunner.manager.create(Guild, {
+        name,
+        description,
+        leaderId: userId,
+        maxMembers: 20,
+        currentMembers: 1,
+      });
+      const savedGuild = await queryRunner.manager.save(guild);
+
+      // Create leader member and mark approved
+      const leaderMember = queryRunner.manager.create(GuildMember, {
+        guildId: savedGuild.id,
+        userId,
+        role: GuildMemberRole.LEADER,
+        isApproved: true,
+      });
+      await queryRunner.manager.save(leaderMember);
+
+      // Update user's guildId column
+      await queryRunner.manager.query(
+        `UPDATE "${userTable}" SET "guildId" = $1 WHERE id = $2`,
+        [savedGuild.id, userId],
+      );
+
+      await queryRunner.commitTransaction();
+      return savedGuild;
+    } catch (err: unknown) {
+      await queryRunner.rollbackTransaction();
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `createGuild failed user=${userId} name=${name}`,
+        trace,
+      );
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // Invite broadcast: leader/deputy can broadcast an invite to world chat
+  async inviteGuild(
+    guildId: number,
+    inviterId: number,
+  ): Promise<GuildInvitePayload> {
+    // Verify inviter is leader or deputy
+    const inviter = await this.guildMemberRepository.findOne({
+      where: { guildId, userId: inviterId },
+    });
+    if (
+      !inviter ||
+      (inviter.role !== GuildMemberRole.LEADER &&
+        inviter.role !== GuildMemberRole.DEPUTY)
+    ) {
+      throw new ForbiddenException('Bạn không có quyền mời người chơi');
+    }
+
+    const guild = await this.guildRepository.findOne({
+      where: { id: guildId },
+    });
+    if (!guild) throw new NotFoundException('Công hội không tồn tại');
+
+    // Rate-limit invites per inviter: 1 invite per 30 seconds
+    try {
+      if (this.redisClient) {
+        const key = `rl:guild:invite:${guildId}:${inviterId}`;
+        const ttl = 30; // seconds
+        const cur = await this.redisClient.get(key);
+        if (cur) {
+          throw new BadRequestException('Vui lòng chờ trước khi mời lại');
+        }
+        await this.redisClient.set(key, '1', 'EX', ttl);
+      }
+    } catch (e) {
+      // If redis fails, fail-open but log
+      this.logger.warn(
+        'inviteGuild redis check failed',
+        (e as Error).message || e,
       );
     }
 
-    // Kiểm tra tên công hội có bị trùng không
-    const existingGuild = await this.guildRepository.findOne({
-      where: { name },
+    // Try to resolve inviter username quickly
+    const user = await this.userRepository.findOne({
+      where: { id: inviterId },
     });
+    const payload: GuildInvitePayload = {
+      guildId,
+      guildName: guild.name,
+      inviterId,
+      inviterUsername: user?.username,
+      timestamp: new Date().toISOString(),
+    };
 
-    if (existingGuild) {
-      throw new BadRequestException('Tên công hội đã tồn tại');
+    // Emit event for other services (ChatGateway will listen and broadcast into world)
+    try {
+      guildEvents.emit('guildInvite', payload);
+    } catch (e) {
+      this.logger.warn('failed to emit guildInvite', e as any);
     }
 
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user) {
-      throw new NotFoundException('Người dùng không tồn tại');
-    }
-
-    const guild = this.guildRepository.create({
-      name,
-      description,
-      leaderId: userId,
-      maxMembers: 20, // Lv1: 20 thành viên
-      currentMembers: 1,
-    });
-
-    const savedGuild = await this.guildRepository.save(guild);
-
-    // Tự động thêm hội trưởng vào công hội
-    const leaderMember = this.guildMemberRepository.create({
-      guildId: savedGuild.id,
-      userId,
-      role: GuildMemberRole.LEADER,
-    });
-
-    await this.guildMemberRepository.save(leaderMember);
-
-    return savedGuild;
+    return payload;
   }
 
   // Xin vào công hội
@@ -88,15 +210,62 @@ export class GuildService {
     userId: number,
     guildId: number,
   ): Promise<GuildMember> {
-    // Kiểm tra người dùng đã có công hội chưa
-    const existingMember = await this.guildMemberRepository.findOne({
-      where: { userId },
-    });
+    this.logger.debug(
+      `requestJoinGuild: start user=${userId} guild=${guildId}`,
+    );
+    // Load the user to check guildId quickly
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Người dùng không tồn tại');
+    }
 
-    if (existingMember) {
-      throw new BadRequestException(
-        'Bạn đã là thành viên của một công hội khác',
+    // Some User entity definitions don't expose guildId directly, query DB column
+    try {
+      const userTable = this.userRepository.metadata.tableName;
+      const res: Array<{ guildId: number | null }> =
+        await this.userRepository.manager.query(
+          `SELECT "guildId" FROM "${userTable}" WHERE id = $1`,
+          [userId],
+        );
+      if (res.length > 0 && res[0].guildId) {
+        this.logger.debug(
+          `requestJoinGuild: user ${userId} already has guildId=${res[0].guildId}`,
+        );
+        throw new BadRequestException(
+          'Bạn đã là thành viên của một công hội khác',
+        );
+      }
+    } catch (err) {
+      // If the direct query fails for schema reasons, fall back to entity check
+      this.logger.debug(
+        'requestJoinGuild: fallback guild check failed query',
+        err instanceof Error ? err.message : String(err),
       );
+      let maybeGuild: unknown = undefined;
+      if (
+        typeof user === 'object' &&
+        user !== null &&
+        'guild' in (user as any)
+      ) {
+        const u = user as any;
+        maybeGuild = u.guild;
+      }
+      if (maybeGuild) {
+        throw new BadRequestException(
+          'Bạn đã là thành viên của một công hội khác',
+        );
+      }
+    }
+
+    // Prevent creating duplicate pending requests for same guild
+    const existingPending = await this.guildMemberRepository.findOne({
+      where: { userId, guildId, isApproved: false },
+    });
+    if (existingPending) {
+      this.logger.debug(
+        `requestJoinGuild: user ${userId} already has pending request for guild ${guildId}`,
+      );
+      throw new BadRequestException('Bạn đã gửi yêu cầu tham gia công hội này');
     }
 
     const guild = await this.guildRepository.findOne({
@@ -111,14 +280,32 @@ export class GuildService {
       throw new BadRequestException('Công hội đã đầy thành viên');
     }
 
-    // Tạo request join (có thể thêm status PENDING sau)
+    // Tạo request join as not approved yet
     const member = this.guildMemberRepository.create({
       guildId,
       userId,
       role: GuildMemberRole.MEMBER,
+      isApproved: false,
     });
 
-    return await this.guildMemberRepository.save(member);
+    const saved = await this.guildMemberRepository.save(member);
+    // emit event so leaders/deputies can be notified in real-time
+    this.emitJoinRequestEvent(saved);
+    return saved;
+  }
+
+  // Emit join request event
+  private emitJoinRequestEvent(member: GuildMember) {
+    try {
+      guildEvents.emit('guildJoinRequest', {
+        guildId: member.guildId,
+        userId: member.userId,
+        username: (member as any).user?.username,
+        joinedAt: member.joinedAt?.toISOString?.(),
+      });
+    } catch (e) {
+      this.logger.warn('emitJoinRequestEvent failed', e as any);
+    }
   }
 
   // Duyệt thành viên vào công hội
@@ -127,38 +314,121 @@ export class GuildService {
     userId: number,
     approverId: number,
   ): Promise<GuildMember> {
-    // Kiểm tra quyền duyệt
-    const approver = await this.guildMemberRepository.findOne({
-      where: { guildId, userId: approverId },
-    });
+    // Use transaction + row locking to avoid races when approving multiple members
+    const queryRunner =
+      this.guildRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Check approver role inside the transaction
+      const approver = await queryRunner.manager.findOne(GuildMember, {
+        where: { guildId, userId: approverId },
+      });
 
-    if (
-      !approver ||
-      (approver.role !== GuildMemberRole.LEADER &&
-        approver.role !== GuildMemberRole.DEPUTY)
-    ) {
-      throw new ForbiddenException('Bạn không có quyền duyệt thành viên');
+      if (
+        !approver ||
+        (approver.role !== GuildMemberRole.LEADER &&
+          approver.role !== GuildMemberRole.DEPUTY)
+      ) {
+        throw new ForbiddenException('Bạn không có quyền duyệt thành viên');
+      }
+
+      const member = await queryRunner.manager.findOne(GuildMember, {
+        where: { guildId, userId },
+      });
+
+      if (!member) {
+        throw new NotFoundException('Yêu cầu tham gia không tồn tại');
+      }
+
+      if (member.isApproved) {
+        throw new BadRequestException('Yêu cầu đã được duyệt trước đó');
+      }
+
+      // Lock the guild row to update currentMembers safely
+      const guild = await queryRunner.manager.findOne(Guild, {
+        where: { id: guildId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!guild) {
+        throw new NotFoundException('Công hội không tồn tại');
+      }
+
+      if (guild.currentMembers >= guild.maxMembers) {
+        throw new BadRequestException('Công hội đã đầy thành viên');
+      }
+
+      guild.currentMembers++;
+      await queryRunner.manager.save(guild);
+
+      // mark member as approved
+      member.isApproved = true;
+      await queryRunner.manager.save(member);
+
+      // update user's guild_id column directly to keep users table in sync
+      // Use repository metadata to get the actual table name (handles naming strategy)
+      this.logger.debug('approveMember: committing transaction');
+      await queryRunner.commitTransaction();
+      this.logger.debug('approveMember: committed transaction');
+
+      // Update user's guildId outside the transaction. If this fails, log but do not rollback
+      // the already committed approval to avoid inconsistent UX (member approved but 500 returned).
+      try {
+        const userTable = this.userRepository.metadata.tableName;
+        this.logger.debug(
+          `approveMember: updating user table ${userTable} set guildId=${guildId} for user ${userId}`,
+        );
+        const updateResult = await this.userRepository.manager.query(
+          `UPDATE "${userTable}" SET "guildId" = $1 WHERE id = $2 RETURNING id, "guildId"`,
+          [guildId, userId],
+        );
+        this.logger.debug(
+          `approveMember: updateResult=${JSON.stringify(updateResult)}`,
+        );
+      } catch (err: unknown) {
+        const trace =
+          err instanceof Error
+            ? (err.stack ?? err.message)
+            : typeof err === 'object'
+              ? JSON.stringify(err)
+              : String(err);
+        this.logger.error(
+          `approveMember: failed to update user.guildId for user=${userId} guild=${guildId}`,
+          trace,
+        );
+        // don't throw; approval already committed
+      }
+
+      // Emit member approved event
+      try {
+        guildEvents.emit('guildMemberApproved', {
+          guildId,
+          userId,
+          approvedBy: approverId,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (e) {
+        this.logger.warn('failed to emit guildMemberApproved', e);
+      }
+
+      return member;
+    } catch (err: unknown) {
+      await queryRunner.rollbackTransaction();
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `approveMember failed guild=${guildId} user=${userId} approver=${approverId}`,
+        trace,
+      );
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-
-    const member = await this.guildMemberRepository.findOne({
-      where: { guildId, userId },
-    });
-
-    if (!member) {
-      throw new NotFoundException('Yêu cầu tham gia không tồn tại');
-    }
-
-    // Cập nhật số lượng thành viên
-    const guild = await this.guildRepository.findOne({
-      where: { id: guildId },
-    });
-    if (!guild) {
-      throw new NotFoundException('Công hội không tồn tại');
-    }
-    guild.currentMembers++;
-    await this.guildRepository.save(guild);
-
-    return member;
   }
 
   // Cống hiến vàng cho công hội
@@ -194,7 +464,21 @@ export class GuildService {
     member.honorPoints += Math.floor(amount / 10); // 1 vàng = 0.1 điểm vinh dự
     member.weeklyContribution += amount;
 
-    return await this.guildMemberRepository.save(member);
+    const saved = await this.guildMemberRepository.save(member);
+
+    // Emit contribution event
+    try {
+      guildEvents.emit('guildContributed', {
+        guildId,
+        userId,
+        amount,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('failed to emit guildContributed', e);
+    }
+
+    return saved;
   }
 
   // Lên cấp công hội
@@ -219,7 +503,7 @@ export class GuildService {
     }
 
     // Tính chi phí nâng cấp (tăng dần theo cấp)
-    const upgradeCost = guild.level * 1000;
+    const upgradeCost = guild.level * 5000;
 
     if (guild.goldFund < upgradeCost) {
       throw new BadRequestException(`Cần ${upgradeCost} vàng để nâng cấp`);
@@ -244,8 +528,17 @@ export class GuildService {
       where: { guildId, userId: assignerId },
     });
 
-    if (!assigner || assigner.role !== GuildMemberRole.LEADER) {
-      throw new ForbiddenException('Chỉ hội trưởng mới có quyền bổ nhiệm');
+    if (!assigner) {
+      throw new ForbiddenException('Bạn không phải thành viên của công hội');
+    }
+
+    // Leader can assign any role. Deputy can assign roles lower than themselves (not LEADER)
+    if (assigner.role === GuildMemberRole.DEPUTY) {
+      if (newRole === GuildMemberRole.LEADER) {
+        throw new ForbiddenException('Hội phó không thể bổ nhiệm hội trưởng');
+      }
+    } else if (assigner.role !== GuildMemberRole.LEADER) {
+      throw new ForbiddenException('Bạn không có quyền bổ nhiệm');
     }
 
     const targetMember = await this.guildMemberRepository.findOne({
@@ -279,6 +572,100 @@ export class GuildService {
 
     targetMember.role = newRole;
     return await this.guildMemberRepository.save(targetMember);
+  }
+
+  // Rời công hội
+  async leaveGuild(userId: number, guildId: number) {
+    const member = await this.guildMemberRepository.findOne({
+      where: { guildId, userId },
+      relations: ['guild'],
+    });
+
+    if (!member) {
+      throw new NotFoundException('Bạn không phải thành viên của công hội này');
+    }
+
+    const guild = member.guild;
+
+    // If leader leaves, attempt to promote a deputy, else make the oldest elder, else transfer to null (disband?)
+    if (member.role === GuildMemberRole.LEADER) {
+      // find deputy
+      const deputy = await this.guildMemberRepository.findOne({
+        where: { guildId, role: GuildMemberRole.DEPUTY },
+        order: { joinedAt: 'ASC' },
+      });
+
+      if (deputy) {
+        deputy.role = GuildMemberRole.LEADER;
+        guild.leaderId = deputy.userId;
+        await this.guildMemberRepository.save(deputy);
+        await this.guildRepository.save(guild);
+      } else {
+        // find elder
+        const elder = await this.guildMemberRepository.findOne({
+          where: { guildId, role: GuildMemberRole.ELDER },
+          order: { joinedAt: 'ASC' },
+        });
+        if (elder) {
+          elder.role = GuildMemberRole.LEADER;
+          guild.leaderId = elder.userId;
+          await this.guildMemberRepository.save(elder);
+          await this.guildRepository.save(guild);
+        } else {
+          // No one to promote: mark guild as disbanded
+          guild.status = GuildStatus.DISBANDED;
+          await this.guildRepository.save(guild);
+        }
+      }
+    }
+
+    // Remove the member (use delete by id to ensure SQL DELETE)
+    try {
+      await this.guildMemberRepository.delete({ id: member.id });
+    } catch (err: unknown) {
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `leaveGuild: failed to delete guild_member id=${member.id}`,
+        trace,
+      );
+      throw err;
+    }
+
+    // clear user's guildId reference using repository metadata for table name
+    try {
+      const userTable = this.userRepository.metadata.tableName;
+      this.logger.debug(
+        `leaveGuild: clearing guildId on ${userTable} for user ${userId}`,
+      );
+      await this.userRepository.manager.query(
+        `UPDATE "${userTable}" SET "guildId" = NULL WHERE id = $1`,
+        [userId],
+      );
+    } catch (err: unknown) {
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `leaveGuild: failed to clear user.guildId for user=${userId}`,
+        trace,
+      );
+      throw err;
+    }
+    // Decrement currentMembers if guild still active
+    if (guild.status === GuildStatus.ACTIVE && guild.currentMembers > 0) {
+      guild.currentMembers = Math.max(0, guild.currentMembers - 1);
+      await this.guildRepository.save(guild);
+    }
+
+    return { success: true };
   }
 
   // Tạo sự kiện công hội chiến
@@ -335,7 +722,7 @@ export class GuildService {
   // Lấy công hội của người chơi
   async getUserGuild(userId: number): Promise<Guild | null> {
     const member = await this.guildMemberRepository.findOne({
-      where: { userId },
+      where: { userId, isApproved: true },
       relations: ['guild'],
     });
 
@@ -344,11 +731,139 @@ export class GuildService {
 
   // Lấy thành viên công hội
   async getGuildMembers(guildId: number): Promise<GuildMember[]> {
+    // return only approved members
     return await this.guildMemberRepository.find({
-      where: { guildId },
+      where: { guildId, isApproved: true },
       relations: ['user'],
       order: { role: 'ASC', joinedAt: 'ASC' },
     });
+  }
+
+  // Lấy các yêu cầu tham gia (chưa duyệt)
+  async getGuildRequests(guildId: number): Promise<GuildMember[]> {
+    return await this.guildMemberRepository.find({
+      where: { guildId, isApproved: false },
+      relations: ['user'],
+      order: { joinedAt: 'ASC' },
+    });
+  }
+
+  // Từ chối (xóa) yêu cầu tham gia
+  async rejectMember(guildId: number, userId: number, rejecterId: number) {
+    // Only leader or deputy can reject
+    const rejecter = await this.guildMemberRepository.findOne({
+      where: { guildId, userId: rejecterId },
+    });
+    if (
+      !rejecter ||
+      (rejecter.role !== GuildMemberRole.LEADER &&
+        rejecter.role !== GuildMemberRole.DEPUTY)
+    ) {
+      throw new ForbiddenException('Bạn không có quyền từ chối yêu cầu');
+    }
+
+    const member = await this.guildMemberRepository.findOne({
+      where: { guildId, userId, isApproved: false },
+    });
+    if (!member) {
+      throw new NotFoundException('Yêu cầu không tồn tại');
+    }
+
+    await this.guildMemberRepository.remove(member);
+    // Emit reject event
+    try {
+      guildEvents.emit('guildJoinRequestRejected', {
+        guildId,
+        userId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('failed to emit guildJoinRequestRejected', e);
+    }
+    return { success: true };
+  }
+
+  // Đuổi thành viên
+  async kickMember(guildId: number, targetUserId: number, kickerId: number) {
+    // Only leader or deputy can kick
+    const kicker = await this.guildMemberRepository.findOne({
+      where: { guildId, userId: kickerId },
+    });
+    if (
+      !kicker ||
+      (kicker.role !== GuildMemberRole.LEADER &&
+        kicker.role !== GuildMemberRole.DEPUTY)
+    ) {
+      throw new ForbiddenException('Bạn không có quyền đuổi thành viên');
+    }
+
+    // Can't kick the leader
+    const targetMember = await this.guildMemberRepository.findOne({
+      where: { guildId, userId: targetUserId, isApproved: true },
+      relations: ['guild'],
+    });
+    if (!targetMember) {
+      throw new NotFoundException('Thành viên không tồn tại trong công hội');
+    }
+
+    if (targetMember.role === GuildMemberRole.LEADER) {
+      throw new BadRequestException('Không thể đuổi hội trưởng');
+    }
+
+    const guild = targetMember.guild;
+
+    // Delete the member row
+    try {
+      await this.guildMemberRepository.delete({ id: targetMember.id });
+    } catch (err: unknown) {
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `kickMember: failed to delete member id=${targetMember.id}`,
+        trace,
+      );
+      throw err;
+    }
+
+    // Clear user's guildId
+    try {
+      const userTable = this.userRepository.metadata.tableName;
+      this.logger.debug(
+        `kickMember: clearing guildId on ${userTable} for user ${targetUserId}`,
+      );
+      await this.userRepository.manager.query(
+        `UPDATE "${userTable}" SET "guildId" = NULL WHERE id = $1`,
+        [targetUserId],
+      );
+    } catch (err: unknown) {
+      const trace =
+        err instanceof Error
+          ? (err.stack ?? err.message)
+          : typeof err === 'object'
+            ? JSON.stringify(err)
+            : String(err);
+      this.logger.error(
+        `kickMember: failed to clear user.guildId for user=${targetUserId}`,
+        trace,
+      );
+      // don't throw; member removed already
+    }
+
+    // Decrement currentMembers if guild active
+    if (
+      guild &&
+      guild.status === GuildStatus.ACTIVE &&
+      guild.currentMembers > 0
+    ) {
+      guild.currentMembers = Math.max(0, guild.currentMembers - 1);
+      await this.guildRepository.save(guild);
+    }
+
+    return { success: true };
   }
 
   // Lấy sự kiện công hội

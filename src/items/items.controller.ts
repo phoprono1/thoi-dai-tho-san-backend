@@ -101,6 +101,25 @@ export class ItemsController {
     return this.itemsService.findByType(type);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Lấy thông tin chi tiết của một item' })
+  @ApiParam({ name: 'id', description: 'ID của item' })
+  @ApiResponse({
+    status: 200,
+    description: 'Chi tiết item (bao gồm itemSet nếu có)',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy item',
+  })
+  async findOne(@Param('id') id: string): Promise<Item> {
+    const item = await this.itemsService.findOne(+id);
+    if (!item) {
+      throw new HttpException('Item not found', HttpStatus.NOT_FOUND);
+    }
+    return item;
+  }
+
   @Post()
   @ApiOperation({ summary: 'Tạo item mới' })
   @ApiBody({

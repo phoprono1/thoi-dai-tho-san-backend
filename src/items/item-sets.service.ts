@@ -34,7 +34,28 @@ export class ItemSetsService {
 
   async create(itemSet: Partial<ItemSet>): Promise<ItemSet> {
     const newItemSet = this.itemSetsRepository.create(itemSet);
-    return this.itemSetsRepository.save(newItemSet);
+    const saved = await this.itemSetsRepository.save(newItemSet);
+
+    // If items were provided when creating the set, ensure each Item's setId
+    // foreign key is updated to point to the new set. This keeps the Item
+    // rows consistent (some callers previously only updated the join table
+    // which left the Item.setId null).
+    if (itemSet.items && itemSet.items.length) {
+      const incomingIds = (itemSet.items as Array<{ id?: number } | number>)
+        .map((i) =>
+          typeof i === 'object' && i !== null ? (i as any).id : (i as number),
+        )
+        .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
+
+      if (incomingIds.length) {
+        await this.itemsRepository.update(
+          { id: In(incomingIds) },
+          { setId: saved.id },
+        );
+      }
+    }
+
+    return saved;
   }
 
   async update(id: number, itemSet: Partial<ItemSet>): Promise<ItemSet | null> {
@@ -66,8 +87,29 @@ export class ItemSetsService {
       if (typeof itemSet.setBonuses !== 'undefined')
         existing.setBonuses = itemSet.setBonuses as any[];
 
-      existing.items = items;
-      return this.itemSetsRepository.save(existing);
+      const saved = await this.itemSetsRepository.save({ ...existing, items });
+
+      // Update Item.setId for newly attached items
+
+      const existingIds = (existing.items || [])
+        .map((i) => i.id)
+        .filter(Boolean) as number[];
+
+      const toAttach = incomingIds.filter((i) => !existingIds.includes(i));
+      const toDetach = existingIds.filter((i) => !incomingIds.includes(i));
+
+      if (toAttach.length) {
+        await this.itemsRepository.update({ id: In(toAttach) }, { setId: id });
+      }
+
+      if (toDetach.length) {
+        await this.itemsRepository.update(
+          { id: In(toDetach) },
+          { setId: null },
+        );
+      }
+
+      return this.findOne(id);
     }
 
     await this.itemSetsRepository.update(id, itemSet);

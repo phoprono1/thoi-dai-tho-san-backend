@@ -6,6 +6,7 @@ import { UserItem } from './user-item.entity';
 import { UpgradeLog, UpgradeResult } from './upgrade-log.entity';
 import { User } from '../users/user.entity';
 import { Item } from '../items/item.entity';
+import { ItemSet } from '../items/item-set.entity';
 import { ItemType, ConsumableType } from '../items/item-types.enum';
 import { UserStatsService } from '../user-stats/user-stats.service';
 import { UsersService } from '../users/users.service';
@@ -421,40 +422,172 @@ export class UserItemsService {
     try {
       const userStats = userStatsBefore; // already fetched prior to changes
       if (userStats) {
-        // Sum item stats before the change (used to compute level-only contribution)
-        let prevItemsAttack = 0;
-        let prevItemsDefense = 0;
-        let prevItemsHp = 0;
+        // Sum item stats before the change (used to compute level-only contribution and to remove previous item contributions)
+        const STAT_KEYS = [
+          'attack',
+          'defense',
+          'hp',
+          'critRate',
+          'critDamage',
+          'comboRate',
+          'counterRate',
+          'lifesteal',
+          'armorPen',
+          'dodgeRate',
+          'accuracy',
+          'strength',
+          'intelligence',
+          'dexterity',
+          'vitality',
+          'luck',
+        ];
+
+        // Set bonus shape used by item sets
+        interface SetBonus {
+          pieces: number;
+          type?: string;
+          stats?: Record<string, number>;
+          description?: string;
+        }
+
+        const prevItemsStats: Record<string, number> = {};
+        STAT_KEYS.forEach((k) => (prevItemsStats[k] = 0));
         equippedBefore.forEach((ui) => {
           const it = ui.item;
-          const its = (it?.stats || {}) as Record<string, unknown>;
-          const up = (ui.upgradeStats || {}) as Record<string, unknown>;
+          const its = (it?.stats || {}) as Record<string, number>;
+          const up = (ui.upgradeStats || {}) as Record<string, number>;
+          STAT_KEYS.forEach((k) => {
+            prevItemsStats[k] += Number(its[k] || 0) + Number(up[k] || 0);
+          });
+        });
 
-          prevItemsAttack +=
-            Number(its['attack'] || 0) + Number(up['attack'] || 0);
-          prevItemsDefense +=
-            Number(its['defense'] || 0) + Number(up['defense'] || 0);
-          prevItemsHp +=
-            Number(its['hp'] || its['maxHp'] || 0) +
-            Number(up['hp'] || up['maxHp'] || 0);
+        // Include previously active set bonuses into prevItemsStats so they are
+        // removed correctly when recalculating. Use the single best bonus per set
+        // (the bonus with the highest `pieces` threshold <= equipped count).
+        const prevSetsMap: Record<number, { set: ItemSet; count: number }> = {};
+        equippedBefore.forEach((ui) => {
+          const set = (ui.item as Item & { itemSet?: ItemSet }).itemSet;
+          if (set && set.id) {
+            if (!prevSetsMap[set.id]) prevSetsMap[set.id] = { set, count: 0 };
+            prevSetsMap[set.id].count++;
+          }
+        });
+
+        const prevSetFlat: Record<string, number> = {};
+        const prevSetPercent: Record<string, number> = {};
+        STAT_KEYS.forEach((k) => {
+          prevSetFlat[k] = 0;
+          prevSetPercent[k] = 0;
+        });
+
+        Object.values(prevSetsMap).forEach(({ set, count }) => {
+          const bonuses: SetBonus[] = (set.setBonuses as SetBonus[]) || [];
+          let best: SetBonus | null = null;
+          bonuses.forEach((b) => {
+            if (!b || typeof b.pieces !== 'number') return;
+            if (b.pieces <= count) {
+              if (!best || b.pieces > best.pieces) best = b;
+            }
+          });
+          if (!best) return;
+          const stats = best.stats || {};
+          const btype = (best.type || 'flat').toString();
+          Object.entries(stats).forEach(([statKey, val]) => {
+            const num = Number(val || 0);
+            if (Number.isNaN(num) || num === 0) return;
+            if (btype === 'flat') {
+              prevSetFlat[statKey] = (prevSetFlat[statKey] || 0) + num;
+            } else {
+              prevSetPercent[statKey] = (prevSetPercent[statKey] || 0) + num;
+            }
+          });
+        });
+
+        // Apply previous set flats and percents into prevItemsStats so subtraction will remove them
+        Object.keys(prevSetFlat).forEach((k) => {
+          prevItemsStats[k] = (prevItemsStats[k] || 0) + (prevSetFlat[k] || 0);
+        });
+        Object.keys(prevSetPercent).forEach((k) => {
+          const pct = prevSetPercent[k] || 0;
+          if (pct !== 0) {
+            const baseVal = prevItemsStats[k] || 0;
+            prevItemsStats[k] = Math.floor(baseVal + (baseVal * pct) / 100);
+          }
         });
 
         // Aggregate equipped items for this user AFTER the save (current equipment)
         const equippedAfter = await this.getEquippedItems(userItem.userId);
-        let itemsAttack = 0;
-        let itemsDefense = 0;
-        let itemsHp = 0;
+        const itemsStats: Record<string, number> = {};
+        STAT_KEYS.forEach((k) => (itemsStats[k] = 0));
+        // Track set-based bonuses: flat additions and percentage multipliers
+        const setFlat: Record<string, number> = {};
+        const setPercent: Record<string, number> = {};
+        STAT_KEYS.forEach((k) => {
+          setFlat[k] = 0;
+          setPercent[k] = 0;
+        });
+
+        // Sum raw item + upgrade stats
         equippedAfter.forEach((ui) => {
           const it = ui.item;
-          const its = (it?.stats || {}) as Record<string, unknown>;
-          const up = (ui.upgradeStats || {}) as Record<string, unknown>;
+          const its = (it?.stats || {}) as Record<string, number>;
+          const up = (ui.upgradeStats || {}) as Record<string, number>;
+          STAT_KEYS.forEach((k) => {
+            itemsStats[k] += Number(its[k] || 0) + Number(up[k] || 0);
+          });
+        });
 
-          itemsAttack += Number(its['attack'] || 0) + Number(up['attack'] || 0);
-          itemsDefense +=
-            Number(its['defense'] || 0) + Number(up['defense'] || 0);
-          itemsHp +=
-            Number(its['hp'] || its['maxHp'] || 0) +
-            Number(up['hp'] || up['maxHp'] || 0);
+        // Compute set bonuses based on equipped items per set
+        interface SetBonus {
+          pieces: number;
+          type?: string;
+          stats?: Record<string, number>;
+          description?: string;
+        }
+
+        const setsMap: Record<number, { set: ItemSet; count: number }> = {};
+        equippedAfter.forEach((ui) => {
+          const set = (ui.item as Item & { itemSet?: ItemSet }).itemSet;
+          if (set && set.id) {
+            if (!setsMap[set.id]) setsMap[set.id] = { set, count: 0 };
+            setsMap[set.id].count++;
+          }
+        });
+
+        Object.values(setsMap).forEach(({ set, count }) => {
+          const bonuses: SetBonus[] = (set.setBonuses as SetBonus[]) || [];
+          bonuses.forEach((b) => {
+            if (!b || typeof b.pieces !== 'number') return;
+            if (count >= b.pieces) {
+              const stats = b.stats || {};
+              const btype = (b.type || 'flat').toString();
+              Object.entries(stats).forEach(([statKey, val]) => {
+                const num = Number(val || 0);
+                if (Number.isNaN(num) || num === 0) return;
+                if (btype === 'flat') {
+                  setFlat[statKey] = (setFlat[statKey] || 0) + num;
+                } else {
+                  // percentage
+                  setPercent[statKey] = (setPercent[statKey] || 0) + num;
+                }
+              });
+            }
+          });
+        });
+
+        // Apply flat set bonuses
+        Object.keys(setFlat).forEach((k) => {
+          itemsStats[k] = (itemsStats[k] || 0) + (setFlat[k] || 0);
+        });
+
+        // Apply percentage set bonuses (applied on top of itemsStats)
+        Object.keys(setPercent).forEach((k) => {
+          const pct = setPercent[k] || 0;
+          if (pct !== 0) {
+            const baseVal = itemsStats[k] || 0;
+            const adjusted = Math.floor(baseVal + (baseVal * pct) / 100);
+            itemsStats[k] = adjusted;
+          }
         });
 
         // Compute base derived from class-related stats (strength/vitality)
@@ -466,24 +599,47 @@ export class UserItemsService {
         const baseMaxHpFromClass = Math.floor(classVitality * 10);
 
         // Derive level-only contributions by subtracting base and previous item bonuses from stored stats
+        const userAttackVal = userStats.attack || 0;
+        const userDefenseVal = userStats.defense || 0;
+        const userMaxHpVal = userStats.maxHp || 0;
+
         const levelOnlyAttack = Math.max(
           0,
-          (userStats.attack || 0) - baseAttackFromClass - prevItemsAttack,
+          userAttackVal - baseAttackFromClass - (prevItemsStats['attack'] || 0),
         );
         const levelOnlyDefense = Math.max(
           0,
-          (userStats.defense || 0) - baseDefenseFromClass - prevItemsDefense,
+          userDefenseVal -
+            baseDefenseFromClass -
+            (prevItemsStats['defense'] || 0),
         );
         const levelOnlyMaxHp = Math.max(
           0,
-          (userStats.maxHp || 0) - baseMaxHpFromClass - prevItemsHp,
+          userMaxHpVal - baseMaxHpFromClass - (prevItemsStats['hp'] || 0),
         );
 
-        // New totals = base from class + level-only contributions + current item bonuses
-        const newAttack = baseAttackFromClass + levelOnlyAttack + itemsAttack;
+        // New totals = base from class + level-only contributions + current item bonuses (including set bonuses)
+        const newAttack =
+          baseAttackFromClass + levelOnlyAttack + (itemsStats['attack'] || 0);
         const newDefense =
-          baseDefenseFromClass + levelOnlyDefense + itemsDefense;
-        const newMaxHp = baseMaxHpFromClass + levelOnlyMaxHp + itemsHp;
+          baseDefenseFromClass +
+          levelOnlyDefense +
+          (itemsStats['defense'] || 0);
+        const newMaxHp =
+          baseMaxHpFromClass + levelOnlyMaxHp + (itemsStats['hp'] || 0);
+
+        // Build payload for other stats: remove previous item contributions, add new item contributions
+        const otherStatsUpdate: Record<string, number> = {};
+        // Cast userStats so we can access arbitrary stat keys safely
+        const userStatsRecord = userStats as unknown as Record<string, number>;
+        STAT_KEYS.forEach((k) => {
+          if (k === 'attack' || k === 'defense' || k === 'hp') return;
+          const before = Number(userStatsRecord[k] || 0);
+          const prev = prevItemsStats[k] || 0;
+          const now = itemsStats[k] || 0;
+          const updated = Math.max(0, before - prev + now);
+          otherStatsUpdate[k] = updated;
+        });
 
         // Persist updated derived stats; set currentHp to new max for consistency with recalc behavior
         await this.userStatsService.update(userStats.id, {
@@ -491,6 +647,20 @@ export class UserItemsService {
           defense: newDefense,
           maxHp: newMaxHp,
           currentHp: newMaxHp,
+          // other stats
+          critRate: otherStatsUpdate['critRate'],
+          critDamage: otherStatsUpdate['critDamage'],
+          comboRate: otherStatsUpdate['comboRate'],
+          counterRate: otherStatsUpdate['counterRate'],
+          lifesteal: otherStatsUpdate['lifesteal'],
+          armorPen: otherStatsUpdate['armorPen'],
+          dodgeRate: otherStatsUpdate['dodgeRate'],
+          accuracy: otherStatsUpdate['accuracy'],
+          strength: otherStatsUpdate['strength'],
+          intelligence: otherStatsUpdate['intelligence'],
+          dexterity: otherStatsUpdate['dexterity'],
+          vitality: otherStatsUpdate['vitality'],
+          luck: otherStatsUpdate['luck'],
         });
 
         // Compute and persist combat power for this user
@@ -537,7 +707,7 @@ export class UserItemsService {
   async getEquippedItems(userId: number) {
     return this.userItemsRepository.find({
       where: { userId, isEquipped: true },
-      relations: ['item'],
+      relations: ['item', 'item.itemSet'],
     });
   }
 

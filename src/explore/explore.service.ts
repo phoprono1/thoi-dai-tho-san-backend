@@ -115,7 +115,7 @@ export class ExploreService {
 
       sub.on('message', (_ch, message) => {
         try {
-          const parsed = JSON.parse(message as string);
+          const parsed = JSON.parse(message);
           // match the job by jobId which worker publishes
           if (parsed?.jobId && parsed.jobId === job.id) {
             clearTimeout(timeout);

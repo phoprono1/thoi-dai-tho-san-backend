@@ -6,14 +6,17 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { ChatMessage } from './chat-message.entity';
+import { GuildMember } from '../guild/guild.entity';
 import { UsersModule } from '../users/users.module';
+import { GuildModule } from '../guild/guild.module';
 import { User } from '../users/user.entity';
 import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ChatMessage, User]),
+    TypeOrmModule.forFeature([ChatMessage, User, GuildMember]),
     UsersModule,
+    GuildModule,
     CommonModule,
     ConfigModule,
     JwtModule.registerAsync({

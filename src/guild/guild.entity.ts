@@ -119,6 +119,9 @@ export class GuildMember {
   @Column({ type: 'boolean', default: false })
   isOnline: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isApproved: boolean; // Whether the join request was approved
+
   @CreateDateColumn()
   joinedAt: Date;
 

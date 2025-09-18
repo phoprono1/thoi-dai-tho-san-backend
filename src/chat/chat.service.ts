@@ -1,13 +1,16 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ChatMessage, ChatType } from './chat-message.entity';
 import { User } from '../users/user.entity';
 import { SendMessageDto, ChatMessageResponseDto } from './chat.dto';
+import { GuildMember } from '../guild/guild.entity';
 
 @Injectable()
 export class ChatService {
@@ -16,6 +19,8 @@ export class ChatService {
     private chatMessageRepository: Repository<ChatMessage>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(GuildMember)
+    private guildMemberRepository?: Repository<any>,
   ) {}
 
   async sendMessage(
@@ -33,7 +38,16 @@ export class ChatService {
       if (!dto.guildId) {
         throw new BadRequestException('Guild ID is required for guild chat');
       }
-      // TODO: Check if user is member of the guild
+
+      // Verify membership
+      if (this.guildMemberRepository) {
+        const membership = await this.guildMemberRepository.findOne({
+          where: { guildId: dto.guildId, userId },
+        });
+        if (!membership) {
+          throw new ForbiddenException('User is not member of the guild');
+        }
+      }
     }
 
     // Create message

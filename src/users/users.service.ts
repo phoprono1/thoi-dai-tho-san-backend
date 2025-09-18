@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { guildEvents, GuildLeaderChangedPayload } from '../guild/guild.events';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { User } from './user.entity';
@@ -94,13 +95,70 @@ export class UsersService {
       await queryRunner.manager.delete('user_power', { userId: id });
 
       // Guild membership and related references
+      // If user is a leader of any guilds, attempt to transfer leadership
+      const leaderGuilds: Array<{ id: number }> =
+        await queryRunner.manager.query(
+          `SELECT id FROM guilds WHERE leaderId = $1`,
+          [id],
+        );
+      const leaderChanges: GuildLeaderChangedPayload[] = [];
+      for (const g of leaderGuilds) {
+        // Try to find a deputy, then elder, then oldest member to promote
+        type UserRow = { user_id: number };
+        const deputy: UserRow[] = await queryRunner.manager.query(
+          `SELECT user_id FROM guild_members WHERE guild_id = $1 AND role = 'DEPUTY' ORDER BY joined_at ASC LIMIT 1`,
+          [g.id],
+        );
+        const elder: UserRow[] = await queryRunner.manager.query(
+          `SELECT user_id FROM guild_members WHERE guild_id = $1 AND role = 'ELDER' ORDER BY joined_at ASC LIMIT 1`,
+          [g.id],
+        );
+        const member: UserRow[] = await queryRunner.manager.query(
+          `SELECT user_id FROM guild_members WHERE guild_id = $1 AND role = 'MEMBER' ORDER BY joined_at ASC LIMIT 1`,
+          [g.id],
+        );
+
+        const promoteTo =
+          (deputy && deputy.length > 0 && deputy[0].user_id) ||
+          (elder && elder.length > 0 && elder[0].user_id) ||
+          (member && member.length > 0 && member[0].user_id) ||
+          null;
+        if (promoteTo) {
+          // Update guild leaderId and set new member role to LEADER
+          await queryRunner.manager.update(
+            'guilds',
+            { id: g.id },
+            { leaderId: promoteTo },
+          );
+          await queryRunner.manager.update(
+            'guild_members',
+            { guildId: g.id, userId: promoteTo },
+            { role: 'LEADER' },
+          );
+          leaderChanges.push({
+            guildId: g.id,
+            oldLeaderId: id,
+            newLeaderId: promoteTo,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          // No members left, set leaderId to null
+          await queryRunner.manager.update(
+            'guilds',
+            { id: g.id },
+            { leaderId: null },
+          );
+          leaderChanges.push({
+            guildId: g.id,
+            oldLeaderId: id,
+            newLeaderId: null,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Now delete guild membership rows for this user
       await queryRunner.manager.delete('guild_members', { userId: id });
-      // If user was guild leader, set leaderId to null in guilds
-      await queryRunner.manager.update(
-        'guilds',
-        { leaderId: id },
-        { leaderId: null },
-      );
 
       // Chat messages, combat logs, pvp players, room_player
       await queryRunner.manager.delete('chat_messages', { userId: id });
@@ -112,6 +170,21 @@ export class UsersService {
       await queryRunner.manager.delete('user', { id });
 
       await queryRunner.commitTransaction();
+
+      // Emit guild leader change events after successful commit so listeners
+      // (e.g. ChatGateway) will broadcast only persisted changes.
+      try {
+        for (const payload of leaderChanges) {
+          guildEvents.emit('guildLeaderChanged', payload);
+        }
+      } catch (emitErr) {
+        // Non-fatal: log and continue. We don't want notification failure to
+        // roll back the already committed DB transaction.
+        this.logger.error(
+          'Failed to emit guild leader change events: ' +
+            (emitErr as Error).message,
+        );
+      }
     } catch (err) {
       await queryRunner.rollbackTransaction();
       this.logger.error('Failed to remove account: ' + (err as Error).message);

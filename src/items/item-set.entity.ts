@@ -4,8 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToMany,
-  JoinTable,
+  OneToMany,
 } from 'typeorm';
 import { Item } from './item.entity';
 
@@ -54,12 +53,9 @@ export class ItemSet {
     description: string; // Human readable description
   }[];
 
-  @ManyToMany(() => Item, { cascade: true })
-  @JoinTable({
-    name: 'item_set_items',
-    joinColumn: { name: 'setId', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'itemId', referencedColumnName: 'id' },
-  })
+  // An Item belongs to a single ItemSet via Item.setId / Item.itemSet
+  // Use OneToMany here to match the ManyToOne on the Item side.
+  @OneToMany(() => Item, (item) => item.itemSet)
   items: Item[];
 
   @Column({ default: true })

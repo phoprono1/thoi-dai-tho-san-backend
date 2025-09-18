@@ -18,7 +18,7 @@ export class ItemsService {
 
   findAll(): Promise<Item[]> {
     return this.itemsRepository.find({
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -26,14 +26,14 @@ export class ItemsService {
   findOne(id: number): Promise<Item | null> {
     return this.itemsRepository.findOne({
       where: { id },
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
     });
   }
 
   async findByClass(classId: number): Promise<Item[]> {
     return this.itemsRepository.find({
       where: { id: 0 }, // This will be replaced with proper logic
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
     });
   }
 
@@ -43,7 +43,7 @@ export class ItemsService {
   ): Promise<Item[]> {
     // For now, return all items - we'll implement proper filtering later
     return this.itemsRepository.find({
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -51,14 +51,14 @@ export class ItemsService {
   async findBySet(setId: number): Promise<Item[]> {
     return this.itemsRepository.find({
       where: { setId },
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
     });
   }
 
   async findByType(type: string): Promise<Item[]> {
     return this.itemsRepository.find({
       where: { type: type as ItemType },
-      relations: ['itemSet'],
+      relations: ['itemSet', 'itemSet.items'],
       order: { rarity: 'DESC', createdAt: 'DESC' },
     });
   }

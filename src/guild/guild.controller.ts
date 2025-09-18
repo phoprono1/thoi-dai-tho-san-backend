@@ -9,6 +9,8 @@ import {
   Param,
   UseGuards,
   Request,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,13 +19,12 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { GuildService } from './guild.service';
-import {
-  Guild,
-  GuildMember,
-  GuildEvent,
-  GuildMemberRole,
-} from './guild.entity';
+import { Guild, GuildMember, GuildEvent } from './guild.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CreateGuildDto } from './dto/create-guild.dto';
+import { ContributeDto } from './dto/contribute.dto';
+import { AssignRoleDto } from './dto/assign-role.dto';
+import { CreateGuildWarDto } from './dto/create-guild-war.dto';
 
 @ApiTags('Công hội - Guild')
 @ApiBearerAuth()
@@ -33,6 +34,7 @@ export class GuildController {
   constructor(private readonly guildService: GuildService) {}
 
   @Post('create')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   @ApiOperation({ summary: 'Tạo công hội mới' })
   @ApiResponse({
     status: 201,
@@ -41,10 +43,13 @@ export class GuildController {
   })
   async createGuild(
     @Request() req,
-    @Body('name') name: string,
-    @Body('description') description?: string,
+    @Body() dto: CreateGuildDto,
   ): Promise<Guild> {
-    return await this.guildService.createGuild(req.user.id, name, description);
+    return await this.guildService.createGuild(
+      req.user.id,
+      dto.name,
+      dto.description,
+    );
   }
 
   @Post(':guildId/join')
@@ -80,9 +85,13 @@ export class GuildController {
   async contributeGold(
     @Request() req,
     @Param('guildId') guildId: number,
-    @Body('amount') amount: number,
+    @Body() dto: ContributeDto,
   ): Promise<GuildMember> {
-    return await this.guildService.contributeGold(req.user.id, guildId, amount);
+    return await this.guildService.contributeGold(
+      req.user.id,
+      guildId,
+      dto.amount,
+    );
   }
 
   @Post(':guildId/upgrade')
@@ -109,14 +118,52 @@ export class GuildController {
     @Request() req,
     @Param('guildId') guildId: number,
     @Param('userId') userId: number,
-    @Body('role') role: GuildMemberRole,
+    @Body() dto: AssignRoleDto,
   ): Promise<GuildMember> {
     return await this.guildService.assignRole(
       guildId,
       userId,
-      role,
+      dto.role,
       req.user.id,
     );
+  }
+
+  @Post(':guildId/leave')
+  @ApiOperation({ summary: 'Rời công hội hiện tại' })
+  @ApiResponse({ status: 200, description: 'Đã rời công hội' })
+  async leaveGuild(@Request() req, @Param('guildId') guildId: number) {
+    return await this.guildService.leaveGuild(req.user.id, guildId);
+  }
+
+  @Post(':guildId/invite')
+  @ApiOperation({
+    summary: 'Mời tham gia công hội (phát lời mời ra chat thế giới)',
+  })
+  @ApiResponse({ status: 200, description: 'Lời mời đã được phát' })
+  async inviteToGuild(@Request() req, @Param('guildId') guildId: number) {
+    return await this.guildService.inviteGuild(guildId, req.user.id);
+  }
+
+  @Post(':guildId/reject/:userId')
+  @ApiOperation({ summary: 'Từ chối yêu cầu tham gia công hội' })
+  @ApiResponse({ status: 200, description: 'Đã từ chối yêu cầu' })
+  async rejectMember(
+    @Request() req,
+    @Param('guildId') guildId: number,
+    @Param('userId') userId: number,
+  ) {
+    return await this.guildService.rejectMember(guildId, userId, req.user.id);
+  }
+
+  @Post(':guildId/kick/:userId')
+  @ApiOperation({ summary: 'Đuổi thành viên khỏi công hội' })
+  @ApiResponse({ status: 200, description: 'Đã đuổi thành viên' })
+  async kickMember(
+    @Request() req,
+    @Param('guildId') guildId: number,
+    @Param('userId') userId: number,
+  ) {
+    return await this.guildService.kickMember(guildId, userId, req.user.id);
   }
 
   @Post(':guildId/create-guild-war')
@@ -126,15 +173,15 @@ export class GuildController {
     description: 'Sự kiện công hội chiến đã được tạo',
     type: GuildEvent,
   })
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async createGuildWar(
     @Param('guildId') guildId: number,
-    @Body('opponentGuildId') opponentGuildId: number,
-    @Body('scheduledAt') scheduledAt: Date,
+    @Body() dto: CreateGuildWarDto,
   ): Promise<GuildEvent> {
     return await this.guildService.createGuildWar(
       guildId,
-      opponentGuildId,
-      new Date(scheduledAt),
+      dto.opponentGuildId,
+      dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
     );
   }
 
@@ -182,6 +229,21 @@ export class GuildController {
     @Param('guildId') guildId: number,
   ): Promise<GuildMember[]> {
     return await this.guildService.getGuildMembers(guildId);
+  }
+
+  @Get(':guildId/requests')
+  @ApiOperation({
+    summary: 'Lấy danh sách yêu cầu tham gia công hội (chưa duyệt)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách yêu cầu tham gia',
+    type: [GuildMember],
+  })
+  async getGuildRequests(
+    @Param('guildId') guildId: number,
+  ): Promise<GuildMember[]> {
+    return await this.guildService.getGuildRequests(guildId);
   }
 
   @Get(':guildId/events')
