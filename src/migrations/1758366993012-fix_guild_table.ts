@@ -70,12 +70,16 @@ export class FixGuildTable1758366993012 implements MigrationInterface {
       `ALTER TABLE "guild" ADD "announcement" character varying`,
     );
     await queryRunner.query(`ALTER TABLE "guild" ADD "settings" json`);
-    await queryRunner.query(
-      `ALTER TABLE "guild" DROP CONSTRAINT "FK_593ab5a6b469192870d4ca8d1b3"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "guild" DROP CONSTRAINT "UQ_2ca3d32eea4c6607919f4774bf5"`,
-    );
+    // Drop constraints only if they exist (production schema may differ)
+    await queryRunner.query(`DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_593ab5a6b469192870d4ca8d1b3') THEN
+        ALTER TABLE "guild" DROP CONSTRAINT "FK_593ab5a6b469192870d4ca8d1b3";
+      END IF;
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'UQ_2ca3d32eea4c6607919f4774bf5') THEN
+        ALTER TABLE "guild" DROP CONSTRAINT "UQ_2ca3d32eea4c6607919f4774bf5";
+      END IF;
+    END$$;`);
     await queryRunner.query(
       `ALTER TABLE "guild" ALTER COLUMN "leaderId" DROP NOT NULL`,
     );
