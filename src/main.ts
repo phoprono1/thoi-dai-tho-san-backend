@@ -116,7 +116,12 @@ async function bootstrap() {
   try {
     const fs = await import('fs');
     const path = await import('path');
-    const root = path.join(__dirname, '..', 'assets');
+    // Use process.cwd() so directories are created relative to the runtime
+    // working directory (e.g. /app inside the production container). Using
+    // __dirname may point into /app/dist when compiled which sometimes
+    // doesn't align with the runtime working directory in different
+    // deployment setups.
+    const root = path.join(process.cwd(), 'assets');
     const subdirs = ['monsters', 'dungeons', 'items'];
     if (!fs.existsSync(root)) {
       fs.mkdirSync(root, { recursive: true });
@@ -134,6 +139,9 @@ async function bootstrap() {
     for (const d of subdirs) {
       const p = path.join(root, d);
       if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+      // ensure thumbs subfolder exists for generated thumbnails
+      const thumbs = path.join(p, 'thumbs');
+      if (!fs.existsSync(thumbs)) fs.mkdirSync(thumbs, { recursive: true });
     }
   } catch (err) {
     // Do not crash the app if we cannot create folders; log and continue.
