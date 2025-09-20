@@ -45,9 +45,12 @@ const ServeStaticDynamic: DynamicModule =
       forRoot: (opts: any) => DynamicModule;
     }
   ).forRoot({
-    // When running compiled code under `dist`, __dirname is `dist/src`.
-    // Use two levels up so the runtime path resolves to `backend/assets` (not `backend/dist/assets`).
-    rootPath: join(__dirname, '..', '..', 'assets'),
+    // Serve the assets directory relative to the runtime working directory.
+    // main.ts creates the assets folder using process.cwd(), and in some
+    // container setups __dirname (compiled code location) differs from the
+    // process working directory. Using process.cwd() ensures ServeStatic
+    // serves the same location that the app creates and writes files to.
+    rootPath: join(process.cwd(), 'assets'),
     serveRoot: '/assets',
   });
 
