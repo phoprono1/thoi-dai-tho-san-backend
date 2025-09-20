@@ -22,7 +22,7 @@ export enum GuildStatus {
   DISBANDED = 'DISBANDED',
 }
 
-@Entity('guilds')
+@Entity('guild')
 export class Guild {
   @PrimaryGeneratedColumn()
   id: number;

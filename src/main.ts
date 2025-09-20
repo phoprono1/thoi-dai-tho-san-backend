@@ -5,6 +5,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -106,6 +108,39 @@ async function bootstrap() {
   process.on('exit', (code) => {
     console.log('process.exit event, code=', code);
   });
+
+  // Ensure backend/assets directories exist on startup. When deploying to a VPS
+  // it's common to not commit large binary assets to git; create the folders
+  // automatically so ServeStatic has something to serve and uploads can write
+  // files without failing.
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const root = path.join(__dirname, '..', 'assets');
+    const subdirs = ['monsters', 'dungeons', 'items'];
+    if (!fs.existsSync(root)) {
+      fs.mkdirSync(root, { recursive: true });
+      // create a simple README so the folder is self-describing if someone
+      // inspects the VPS filesystem.
+      try {
+        fs.writeFileSync(
+          path.join(root, 'README.md'),
+          '# Assets\n\nPlace monster, dungeon, and item images in the corresponding subfolders: monsters/, dungeons/, items/\n',
+        );
+      } catch (e) {
+        // ignore write failures
+      }
+    }
+    for (const d of subdirs) {
+      const p = path.join(root, d);
+      if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    }
+  } catch (err) {
+    // Do not crash the app if we cannot create folders; log and continue.
+    // This avoids startup failure on read-only filesystems while still
+    // attempting to provide the convenience for normal VPS deployments.
+    console.warn('Could not create assets directories at startup:', err);
+  }
 
   const app = await NestFactory.create(AppModule);
 

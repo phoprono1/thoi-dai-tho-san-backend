@@ -89,6 +89,9 @@ export class Item {
   @Column({ type: 'int', nullable: true })
   duration: number; // For stat boost duration in minutes
 
+  @Column({ type: 'text', nullable: true })
+  image?: string; // relative path or URL to item image (e.g. /assets/items/1.png)
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, DynamicModule } from '@nestjs/common';
+import { join } from 'path';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -28,37 +30,62 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
 import { AdminImportModule } from './admin-import/admin-import.module';
 import { CommonModule } from './common/common.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
 import { MarketModule } from './market/market.module';
 import { ExploreModule } from './explore/explore.module';
+
+// ServeStatic DynamicModule instance for serving backend/assets at /assets
+// Narrow ts-ignore to the known interop call only
+const ServeStaticDynamic: DynamicModule =
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore: forRoot exists at runtime; keep this narrow to avoid lint noise
+  (
+    ServeStaticModule as unknown as {
+      forRoot: (opts: any) => DynamicModule;
+    }
+  ).forRoot({
+    // When running compiled code under `dist`, __dirname is `dist/src`.
+    // Use two levels up so the runtime path resolves to `backend/assets` (not `backend/dist/assets`).
+    rootPath: join(__dirname, '..', '..', 'assets'),
+    serveRoot: '/assets',
+  });
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      ...(process.env.DATABASE_URL
-        ? {
-            url: process.env.DATABASE_URL,
-            ssl:
-              process.env.NODE_ENV === 'production'
-                ? { rejectUnauthorized: false }
-                : false,
-          }
-        : {
-            host: process.env.DB_HOST || 'localhost',
-            port: parseInt(process.env.DB_PORT || '5432'),
-            username: process.env.DB_USERNAME || 'postgres',
-            password: process.env.DB_PASSWORD || 'password',
-            database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
-          }),
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: process.env.NODE_ENV === 'development', // Only sync in development
-      // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
-      logging: process.env.TYPEORM_LOGGING === 'true',
-    }),
+    // Create DynamicModule instances separately and cast them to avoid
+    // false-positive eslint "no-unsafe-*" rules when complex expressions
+    // are used directly inside the decorator.
+    ((): DynamicModule => {
+      const mod = TypeOrmModule.forRoot({
+        type: 'postgres',
+        ...(process.env.DATABASE_URL
+          ? {
+              url: process.env.DATABASE_URL,
+              ssl:
+                process.env.NODE_ENV === 'production'
+                  ? { rejectUnauthorized: false }
+                  : false,
+            }
+          : {
+              host: process.env.DB_HOST || 'localhost',
+              port: parseInt(process.env.DB_PORT || '5432'),
+              username: process.env.DB_USERNAME || 'postgres',
+              password: process.env.DB_PASSWORD || 'password',
+              database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
+            }),
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: process.env.NODE_ENV === 'development', // Only sync in development
+        // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
+        logging: process.env.TYPEORM_LOGGING === 'true',
+      });
+      return mod;
+    })(),
+    // Serve static assets (images) from backend/assets -> accessible at /assets/*
+    ServeStaticDynamic,
     ScheduleModule.forRoot(),
     CommonModule,
     HealthModule,
@@ -82,6 +109,7 @@ import { ExploreModule } from './explore/explore.module';
     DonorsModule,
     QuestModule,
     MonsterModule,
+    UploadsModule,
     AdminImportModule,
     MarketModule,
     ExploreModule,

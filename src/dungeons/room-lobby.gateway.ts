@@ -36,6 +36,9 @@ export class RoomLobbyGateway
 {
   @WebSocketServer() server: Server;
   private logger = new Logger(RoomLobbyGateway.name);
+  // Map to remember which jobId was enqueued for which roomId so we can
+  // route results even if a payload arrives missing roomId.
+  private jobToRoomMap: Map<string | number, number> = new Map();
 
   constructor(
     private roomLobbyService: RoomLobbyService,
@@ -78,8 +81,35 @@ export class RoomLobbyGateway
             void (async () => {
               try {
                 const payload = JSON.parse(message as string);
-                const roomId = payload.roomId;
+                let roomId = payload.roomId;
+                const jobId = payload.jobId;
                 const result = payload.result;
+
+                // If roomId is missing, try to resolve it from the enqueue map
+                // (set when this gateway enqueued the job). This covers cases
+                // where the job was enqueued with missing/undefined roomId but
+                // we still want to route the result to the originating room.
+                if (!roomId && jobId) {
+                  // try both string and numeric keys safely
+                  const mappedByString = this.jobToRoomMap.get(String(jobId));
+                  let mappedByRaw: number | undefined = undefined;
+                  if (typeof jobId === 'string' || typeof jobId === 'number') {
+                    mappedByRaw = this.jobToRoomMap.get(
+                      jobId as string | number,
+                    );
+                  }
+                  const mapped = mappedByString ?? mappedByRaw;
+                  if (mapped) {
+                    roomId = mapped;
+                    this.logger.log(
+                      `[Emit Debug] Resolved roomId=${roomId} for jobId=${jobId} from enqueue map`,
+                    );
+                  } else {
+                    this.logger.warn(
+                      `[Redis] combat:result payload without roomId (jobId=${jobId}) - full payload: ${message}`,
+                    );
+                  }
+                }
 
                 // Debug: Count clients in room before emitting
                 const roomName = `room_${roomId}`;
@@ -104,9 +134,16 @@ export class RoomLobbyGateway
                   );
                 }
 
-                this.server
-                  .to(`room_${roomId}`)
-                  .emit('combatResult', { roomId, result });
+                if (roomId) {
+                  this.server
+                    .to(`room_${roomId}`)
+                    .emit('combatResult', { roomId, result });
+                } else {
+                  // No room resolved: skip emitting to rooms
+                  this.logger.warn(
+                    `[Emit Debug] Skipping emit because no roomId resolved for jobId=${jobId}`,
+                  );
+                }
                 this.logger.log(
                   `[Redis] combatResult emitted to room_${roomId}`,
                 );
@@ -128,6 +165,12 @@ export class RoomLobbyGateway
                       (e as any)?.message || e
                     }`,
                   );
+                }
+                // cleanup mapping for this jobId if present
+                try {
+                  if (jobId) this.jobToRoomMap.delete(String(jobId));
+                } catch (cleanupErr) {
+                  // ignore cleanup errors
                 }
               } catch (e) {
                 this.logger.warn(

@@ -35,6 +35,9 @@ export class Dungeon {
   @Column('json', { nullable: true })
   dropItems: { itemId: number; dropRate: number }[]; // Items that can drop with their rates
 
+  @Column({ type: 'text', nullable: true })
+  image?: string; // relative path or URL to dungeon image (e.g. /assets/dungeons/1.png)
+
   @CreateDateColumn()
   createdAt: Date;
 

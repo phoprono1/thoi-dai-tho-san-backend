@@ -102,6 +102,14 @@ export class ItemsService {
       updateData.duration = item.duration;
     }
 
+    // Allow updating the image path (string or explicit null to clear)
+    if (
+      'image' in item &&
+      (typeof item.image === 'string' || item.image === null)
+    ) {
+      updateData.image = item.image as unknown as string | null;
+    }
+
     // Handle class restrictions
     if (item.classRestrictions) {
       updateData.classRestrictions = item.classRestrictions;

@@ -152,3 +152,7 @@ coverage/
 # Environment variables
 .env*
 !.env.example
+
+# Backend assets (images)
+/assets/
+

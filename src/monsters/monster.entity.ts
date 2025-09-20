@@ -78,6 +78,9 @@ export class Monster {
   @Column({ default: true })
   isActive: boolean;
 
+  @Column({ type: 'text', nullable: true })
+  image?: string; // relative path or URL to monster image (e.g. /assets/monsters/123.png)
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -61,9 +63,56 @@ export class GuildService {
         where: { userId },
       });
       if (existingMember) {
-        throw new BadRequestException(
-          'Bạn đã là thành viên của một công hội khác',
-        );
+        // If the member points to a disbanded guild or the referenced guild
+        // row no longer exists, treat it as stale and remove it decisively so
+        // the user can create a new guild. Be tolerant: log failures but do
+        // not throw generic Errors that become 500s — proceed with creation.
+        const memberGuild = await queryRunner.manager.findOne(Guild, {
+          where: { id: existingMember.guildId },
+        });
+        if (!memberGuild || memberGuild.status === GuildStatus.DISBANDED) {
+          this.logger.debug(
+            `createGuild: hard-deleting stale membership for user=${userId} guild=${existingMember.guildId}`,
+          );
+
+          // Try to delete the guild member row. If this fails, log and continue.
+          try {
+            await queryRunner.manager.delete(GuildMember, {
+              id: existingMember.id,
+            });
+            this.logger.debug(
+              `createGuild: deleted stale GuildMember id=${existingMember.id}`,
+            );
+          } catch (delErr) {
+            this.logger.warn(
+              `createGuild: failed to delete stale GuildMember id=${existingMember.id}`,
+              delErr as any,
+            );
+          }
+
+          // Attempt to clear user's guildId column; if this fails, log and continue.
+          try {
+            const userTable = this.userRepository.metadata.tableName;
+            await queryRunner.manager.query(
+              `UPDATE "${userTable}" SET "guildId" = NULL WHERE id = $1`,
+              [userId],
+            );
+            this.logger.debug(
+              `createGuild: cleared user.guildId for user=${userId}`,
+            );
+          } catch (updateErr) {
+            this.logger.warn(
+              `createGuild: failed to clear user.guildId for user=${userId}`,
+              updateErr as any,
+            );
+          }
+
+          // proceed with creation regardless of cleanup success
+        } else {
+          throw new BadRequestException(
+            'Bạn đã là thành viên của một công hội khác',
+          );
+        }
       }
 
       // Check duplicate guild name
@@ -872,5 +921,71 @@ export class GuildService {
       where: { guildId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  // Dev helper: attempt to clean stale membership for a user and return diagnostics
+  // NOTE: only intended to be called from dev-only endpoints
+  async _dev_cleanStaleMembership(userId: number) {
+    const diag: any = {
+      userId,
+      foundMember: null,
+      memberGuild: null,
+      deletedMember: false,
+      clearedUserGuildId: false,
+      errors: [],
+    };
+    const queryRunner =
+      this.guildRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const existingMember = await queryRunner.manager.findOne(GuildMember, {
+        where: { userId },
+      });
+      diag.foundMember = existingMember || null;
+      if (!existingMember) {
+        await queryRunner.commitTransaction();
+        return diag;
+      }
+
+      const memberGuild = await queryRunner.manager.findOne(Guild, {
+        where: { id: existingMember.guildId },
+      });
+      diag.memberGuild = memberGuild || null;
+
+      if (!memberGuild || memberGuild.status === GuildStatus.DISBANDED) {
+        try {
+          await queryRunner.manager.delete(GuildMember, {
+            id: existingMember.id,
+          });
+          diag.deletedMember = true;
+        } catch (delErr) {
+          diag.errors.push({ step: 'deleteMember', error: String(delErr) });
+        }
+
+        try {
+          const userTable = this.userRepository.metadata.tableName;
+          await queryRunner.manager.query(
+            `UPDATE "${userTable}" SET "guildId" = NULL WHERE id = $1`,
+            [userId],
+          );
+          diag.clearedUserGuildId = true;
+        } catch (updateErr) {
+          diag.errors.push({
+            step: 'clearUserGuildId',
+            error: String(updateErr),
+          });
+        }
+      }
+
+      await queryRunner.commitTransaction();
+      return diag;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      diag.errors.push({ step: 'transaction', error: String(err) });
+      return diag;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }
