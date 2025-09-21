@@ -58,7 +58,9 @@ export class GuildService {
     // inconsistent state when errors occur.
     if (!this.dataSource) {
       this.logger.error('createGuild: DataSource is not initialized');
-      throw new InternalServerErrorException('Database connection not available');
+      throw new InternalServerErrorException(
+        'Database connection not available',
+      );
     }
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -161,6 +163,22 @@ export class GuildService {
         currentMembers: 1,
       });
       const savedGuild = await queryRunner.manager.save(guild);
+
+      // Debug log để kiểm tra guild ID
+      this.logger.debug(
+        `createGuild: savedGuild.id=${savedGuild.id}, name=${savedGuild.name}`,
+      );
+
+      // Kiểm tra guild có thực sự tồn tại trong DB không
+      const verifyGuild = await queryRunner.manager.findOne(Guild, {
+        where: { id: savedGuild.id },
+      });
+      if (!verifyGuild) {
+        this.logger.error(
+          `createGuild: Guild với ID ${savedGuild.id} không tồn tại sau khi save`,
+        );
+        throw new InternalServerErrorException('Failed to create guild');
+      }
 
       // Create leader member and mark approved
       const leaderMember = queryRunner.manager.create(GuildMember, {
@@ -372,7 +390,9 @@ export class GuildService {
     // Use transaction + row locking to avoid races when approving multiple members
     if (!this.dataSource) {
       this.logger.error('approveMember: DataSource is not initialized');
-      throw new InternalServerErrorException('Database connection not available');
+      throw new InternalServerErrorException(
+        'Database connection not available',
+      );
     }
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -958,8 +978,12 @@ export class GuildService {
       errors: [],
     };
     if (!this.dataSource) {
-      this.logger.error('_dev_cleanStaleMembership: DataSource is not initialized');
-      throw new InternalServerErrorException('Database connection not available');
+      this.logger.error(
+        '_dev_cleanStaleMembership: DataSource is not initialized',
+      );
+      throw new InternalServerErrorException(
+        'Database connection not available',
+      );
     }
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();

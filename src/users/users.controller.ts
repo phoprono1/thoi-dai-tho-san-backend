@@ -75,7 +75,9 @@ export class UsersController {
 
   @Get('search')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Tìm người dùng theo username (admin dropdown search)' })
+  @ApiOperation({
+    summary: 'Tìm người dùng theo username (admin dropdown search)',
+  })
   async search(@Query('q') q: string) {
     const results = await this.usersService.searchByUsername(q || '');
     return results.map((u) => ({ id: u.id, username: u.username }));
