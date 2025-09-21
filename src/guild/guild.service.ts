@@ -26,6 +26,7 @@ import {
 } from './guild.entity';
 import { User } from '../users/user.entity';
 import { Inject } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { REDIS_CLIENT } from '../common/redis.provider';
 import Redis from 'ioredis';
 
@@ -42,6 +43,7 @@ export class GuildService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @Inject(REDIS_CLIENT) private readonly redisClient?: Redis,
+    private readonly dataSource?: DataSource,
   ) {}
 
   // Tạo công hội mới
@@ -53,8 +55,13 @@ export class GuildService {
     // We need an atomic operation: deduct 10_000 gold from the creator and create
     // the guild & leader member in a single transaction to avoid money-loss or
     // inconsistent state when errors occur.
-    const queryRunner =
-      this.guildRepository.manager.connection.createQueryRunner();
+    const queryRunner = this.dataSource
+      ? this.dataSource.createQueryRunner()
+      : // fallback to repository manager if DataSource not injected
+        // (keeps compatibility with older runtime environments)
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        this.guildRepository.manager.connection.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
@@ -364,8 +371,11 @@ export class GuildService {
     approverId: number,
   ): Promise<GuildMember> {
     // Use transaction + row locking to avoid races when approving multiple members
-    const queryRunner =
-      this.guildRepository.manager.connection.createQueryRunner();
+    const queryRunner = this.dataSource
+      ? this.dataSource.createQueryRunner()
+      : // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        this.guildRepository.manager.connection.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
@@ -747,6 +757,20 @@ export class GuildService {
 
   // Lấy danh sách công hội
   async getGuilds(): Promise<Guild[]> {
+    // Sweep: mark any ACTIVE guilds that have no members as DISBANDED so they
+    // do not appear in public listings. Use a single UPDATE query for efficiency.
+    try {
+      await this.guildRepository.manager.query(
+        `UPDATE "${this.guildRepository.metadata.tableName}" SET status = $1 WHERE status = $2 AND "currentMembers" <= 0`,
+        [GuildStatus.DISBANDED, GuildStatus.ACTIVE],
+      );
+    } catch (e) {
+      this.logger.warn(
+        'getGuilds: failed to auto-disband empty guilds',
+        e as any,
+      );
+    }
+
     return await this.guildRepository.find({
       where: { status: GuildStatus.ACTIVE },
       relations: ['leader'],
@@ -934,8 +958,11 @@ export class GuildService {
       clearedUserGuildId: false,
       errors: [],
     };
-    const queryRunner =
-      this.guildRepository.manager.connection.createQueryRunner();
+    const queryRunner = this.dataSource
+      ? this.dataSource.createQueryRunner()
+      : // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        this.guildRepository.manager.connection.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {

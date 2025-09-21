@@ -326,65 +326,67 @@ export class UserItemsService {
       throw new BadRequestException('Vật phẩm không tồn tại');
     }
 
-    // Enforce class/level restrictions before equipping
-    try {
-      const item = userItem.item;
-      const classRestrictions = item.classRestrictions || {};
-      if (classRestrictions.requiredLevel) {
-        const u = await this.usersRepository.findOne({
-          where: { id: userItem.userId },
-          relations: ['characterClass'],
-        });
-        if (u && u.level < classRestrictions.requiredLevel) {
-          throw new BadRequestException(
-            'Cấp độ của bạn chưa đủ để trang bị vật phẩm này',
-          );
+    // Enforce class/level restrictions only when equipping (not when unequipping)
+    if (equip) {
+      try {
+        const item = userItem.item;
+        const classRestrictions = item.classRestrictions || {};
+        if (classRestrictions.requiredLevel) {
+          const u = await this.usersRepository.findOne({
+            where: { id: userItem.userId },
+            relations: ['characterClass'],
+          });
+          if (u && u.level < classRestrictions.requiredLevel) {
+            throw new BadRequestException(
+              'Cấp độ của bạn chưa đủ để trang bị vật phẩm này',
+            );
+          }
         }
-      }
 
-      if (
-        classRestrictions.requiredTier ||
-        classRestrictions.allowedClassTypes ||
-        classRestrictions.restrictedClassTypes
-      ) {
-        const u = await this.usersRepository.findOne({
-          where: { id: userItem.userId },
-          relations: ['characterClass'],
-        });
-        if (u && u.characterClass) {
-          const userTier = u.characterClass.tier;
-          const userType = u.characterClass.type;
-          if (
-            classRestrictions.requiredTier &&
-            userTier < classRestrictions.requiredTier
-          ) {
-            throw new BadRequestException(
-              'Cấp bậc class của bạn chưa đủ để trang bị vật phẩm này',
-            );
-          }
-          if (
-            Array.isArray(classRestrictions.allowedClassTypes) &&
-            classRestrictions.allowedClassTypes.length > 0 &&
-            !classRestrictions.allowedClassTypes.includes(userType)
-          ) {
-            throw new BadRequestException(
-              'Lớp nhân vật của bạn không được phép trang bị vật phẩm này',
-            );
-          }
-          if (
-            Array.isArray(classRestrictions.restrictedClassTypes) &&
-            classRestrictions.restrictedClassTypes.length > 0 &&
-            classRestrictions.restrictedClassTypes.includes(userType)
-          ) {
-            throw new BadRequestException(
-              'Lớp nhân vật của bạn bị hạn chế sử dụng vật phẩm này',
-            );
+        if (
+          classRestrictions.requiredTier ||
+          classRestrictions.allowedClassTypes ||
+          classRestrictions.restrictedClassTypes
+        ) {
+          const u = await this.usersRepository.findOne({
+            where: { id: userItem.userId },
+            relations: ['characterClass'],
+          });
+          if (u && u.characterClass) {
+            const userTier = u.characterClass.tier;
+            const userType = u.characterClass.type;
+            if (
+              classRestrictions.requiredTier &&
+              userTier < classRestrictions.requiredTier
+            ) {
+              throw new BadRequestException(
+                'Cấp bậc class của bạn chưa đủ để trang bị vật phẩm này',
+              );
+            }
+            if (
+              Array.isArray(classRestrictions.allowedClassTypes) &&
+              classRestrictions.allowedClassTypes.length > 0 &&
+              !classRestrictions.allowedClassTypes.includes(userType)
+            ) {
+              throw new BadRequestException(
+                'Lớp nhân vật của bạn không được phép trang bị vật phẩm này',
+              );
+            }
+            if (
+              Array.isArray(classRestrictions.restrictedClassTypes) &&
+              classRestrictions.restrictedClassTypes.length > 0 &&
+              classRestrictions.restrictedClassTypes.includes(userType)
+            ) {
+              throw new BadRequestException(
+                'Lớp nhân vật của bạn bị hạn chế sử dụng vật phẩm này',
+              );
+            }
           }
         }
+      } catch (err) {
+        if (err instanceof BadRequestException) throw err;
+        // ignore and continue if anything else goes wrong with restriction checks
       }
-    } catch (err) {
-      if (err instanceof BadRequestException) throw err;
-      // ignore and continue if anything else goes wrong with restriction checks
     }
 
     // Fetch current user stats and equipped items BEFORE making changes so we can

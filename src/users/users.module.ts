@@ -6,6 +6,7 @@ import { User } from './user.entity';
 import { LevelsModule } from '../levels/levels.module';
 import { UserStatsModule } from '../user-stats/user-stats.module';
 import { UserPowerModule } from '../user-power/user-power.module';
+import { EventsModule } from '../events/events.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { UserPowerModule } from '../user-power/user-power.module';
     LevelsModule,
     UserStatsModule,
     UserPowerModule,
+    EventsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

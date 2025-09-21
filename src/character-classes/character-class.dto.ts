@@ -221,6 +221,9 @@ export class AdvancementResultDto {
     description: string;
   }>;
   message: string;
+  // IDs of items that were auto-unequipped because they are incompatible with the
+  // newly-assigned class. Optional and provided for the client to update caches/UI.
+  unequippedItemIds?: number[];
 }
 
 export class CharacterAdvancementResponseDto {
@@ -232,4 +235,22 @@ export class CharacterAdvancementResponseDto {
   advancementDate?: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export class CreateMappingDto {
+  toClassId: number;
+  levelRequired: number;
+  weight?: number;
+  allowPlayerChoice?: boolean;
+  isAwakening?: boolean;
+  requirements?: any;
+}
+
+export class UpdateMappingDto {
+  toClassId?: number;
+  levelRequired?: number;
+  weight?: number;
+  allowPlayerChoice?: boolean;
+  isAwakening?: boolean;
+  requirements?: any;
 }

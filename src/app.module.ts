@@ -24,6 +24,7 @@ import { ChatModule } from './chat/chat.module';
 import { WorldBossModule } from './world-boss/world-boss.module';
 import { MailboxModule } from './mailbox/mailbox.module';
 import { CharacterClassesModule } from './character-classes/character-classes.module';
+import { EventsModule } from './events/events.module';
 import { DonorsModule } from './donors/donors.module';
 import { QuestModule } from './quests/quest.module';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -92,6 +93,7 @@ const ServeStaticDynamic: DynamicModule =
     ScheduleModule.forRoot(),
     CommonModule,
     HealthModule,
+    EventsModule,
     ClassesModule,
     AuthModule,
     UsersModule,

@@ -72,4 +72,22 @@ export class MailboxGateway implements OnGatewayConnection {
       this.logger.error('Failed to emit mailUnreadCount', err);
     }
   }
+
+  // Emit advancement pending notification to a specific user room
+  emitAdvancementPending(userId: number, pending: unknown) {
+    try {
+      this.server.to(`user_${userId}`).emit('advancement:pending', pending);
+    } catch (err) {
+      this.logger.error('Failed to emit advancement:pending', err);
+    }
+  }
+
+  // Emit advancement applied notification to a specific user room
+  emitAdvancementApplied(userId: number, payload: unknown) {
+    try {
+      this.server.to(`user_${userId}`).emit('advancement:applied', payload);
+    } catch (err) {
+      this.logger.error('Failed to emit advancement:applied', err);
+    }
+  }
 }

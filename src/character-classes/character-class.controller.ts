@@ -21,6 +21,7 @@ import {
   UpdateCharacterClassDto,
 } from './character-class.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdvancementService } from './advancement.service';
 
 interface RequestWithUser extends Request {
   user: { id: number };
@@ -28,7 +29,10 @@ interface RequestWithUser extends Request {
 
 @Controller('character-classes')
 export class CharacterClassController {
-  constructor(private readonly characterClassService: CharacterClassService) {}
+  constructor(
+    private readonly characterClassService: CharacterClassService,
+    private readonly advancementService: AdvancementService,
+  ) {}
 
   @Post()
   async createClass(
@@ -80,11 +84,37 @@ export class CharacterClassController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('advancement/awaken')
+  async awaken(@Request() req: RequestWithUser): Promise<AdvancementResultDto> {
+    return this.characterClassService.awaken(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('advancement/history')
   async getAdvancementHistory(
     @Request() req: RequestWithUser,
   ): Promise<CharacterAdvancementResponseDto[]> {
     return this.characterClassService.getUserAdvancementHistory(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('pending-advancements')
+  async getPendingAdvancements(@Request() req: RequestWithUser) {
+    return this.advancementService.listPendingForUser(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('pending-advancements/:id/accept')
+  async acceptPendingAdvancement(
+    @Request() req: RequestWithUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { mappingId: number },
+  ) {
+    return this.advancementService.acceptPending(
+      req.user.id,
+      id,
+      body.mappingId,
+    );
   }
 
   @Delete(':id')

@@ -1,0 +1,97 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  ParseIntPipe,
+  Put,
+  Delete,
+  UseGuards,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CharacterClassAdvancement } from './character-class-advancement.entity';
+import { CharacterClassService } from './character-class.service';
+import { CreateMappingDto, UpdateMappingDto } from './character-class.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+@Controller('admin/character-classes/:fromClassId/mappings')
+export class MappingsController {
+  constructor(
+    private readonly characterClassService: CharacterClassService,
+    @InjectRepository(CharacterClassAdvancement)
+    private readonly mappingRepo: Repository<CharacterClassAdvancement>,
+  ) {}
+
+  @UseGuards(JwtAuthGuard)
+  @Get()
+  async list(@Param('fromClassId', ParseIntPipe) fromClassId: number) {
+    return this.mappingRepo.find({ where: { fromClassId } });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post()
+  async create(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Body() dto: CreateMappingDto,
+  ) {
+    const mapping = this.mappingRepo.create({ fromClassId, ...dto });
+    return this.mappingRepo.save(mapping);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put(':id')
+  async update(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateMappingDto,
+  ) {
+    const mapping = await this.mappingRepo.findOne({
+      where: { id, fromClassId },
+    });
+    if (!mapping) throw new Error('Mapping not found');
+    Object.assign(mapping, dto);
+    return this.mappingRepo.save(mapping);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  async remove(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const mapping = await this.mappingRepo.findOne({
+      where: { id, fromClassId },
+    });
+    if (!mapping) throw new Error('Mapping not found');
+    await this.mappingRepo.remove(mapping);
+    return { success: true };
+  }
+
+  // Bulk normalize mappings (expects body: { mappings: [{ id, weight, ... }] })
+  @UseGuards(JwtAuthGuard)
+  @Put('normalize')
+  async normalize(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Body() body: { mappings?: Array<{ id: number; weight?: number }> },
+  ) {
+    const items = body?.mappings || [];
+    const results: Array<any> = [];
+    for (const item of items) {
+      try {
+        const mapping = await this.mappingRepo.findOne({
+          where: { id: item.id, fromClassId },
+        });
+        if (!mapping) continue;
+        mapping.weight = Math.max(0, Number(item.weight ?? 0));
+        const saved = await this.mappingRepo.save(mapping);
+        results.push(saved);
+      } catch (e) {
+        // continue on error per-item
+        console.warn('Failed to normalize mapping', item, e);
+      }
+    }
+    return { success: true, updated: results.length, results };
+  }
+}

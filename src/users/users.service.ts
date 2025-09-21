@@ -6,6 +6,7 @@ import { User } from './user.entity';
 import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
 import { UserPowerService } from '../user-power/user-power.service';
+import { EventsService } from '../events/events.module';
 
 @Injectable()
 export class UsersService {
@@ -17,6 +18,7 @@ export class UsersService {
     private readonly userStatsService: UserStatsService,
     private readonly userPowerService: UserPowerService,
     private readonly dataSource: DataSource,
+    private readonly eventsService: EventsService,
   ) {}
 
   findAll(): Promise<User[]> {
@@ -24,7 +26,11 @@ export class UsersService {
   }
 
   async findOne(id: number): Promise<User | null> {
-    const user = await this.usersRepository.findOneBy({ id });
+    // Include characterClass relation so API consumers see user's current class
+    const user = await this.usersRepository.findOne({
+      where: { id },
+      relations: ['characterClass'],
+    });
     if (!user) return null;
 
     // Ensure there's an authoritative user_power row. If missing, compute and persist it.
@@ -46,6 +52,20 @@ export class UsersService {
 
   findByUsername(username: string): Promise<User | null> {
     return this.usersRepository.findOneBy({ username });
+  }
+
+  /**
+   * Search users by username (partial, case-insensitive) for admin lookups.
+   */
+  async searchByUsername(q: string): Promise<User[]> {
+    if (!q || q.trim().length === 0) return [];
+    const like = `%${q.trim().toLowerCase()}%`;
+    return this.usersRepository
+      .createQueryBuilder('u')
+      .where('LOWER(u.username) LIKE :like', { like })
+      .orderBy('u.username', 'ASC')
+      .limit(30)
+      .getMany();
   }
 
   async create(user: Partial<User>): Promise<User> {
@@ -263,6 +283,27 @@ export class UsersService {
 
     // Lưu user
     await this.usersRepository.save(user);
+
+    // Evaluate possible awakenings/promotions after level up
+    try {
+      // Emit an event so advancement logic can be handled by a different module
+      try {
+        this.eventsService.emit('user.levelUp', {
+          userId: user.id,
+          oldLevel: user.level - 1,
+          newLevel: user.level,
+        });
+      } catch (err) {
+        this.logger.error(
+          'Failed to emit levelUp event: ' + (err as Error).message,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        'Failed to evaluate advancement after level up: ' +
+          (err as Error).message,
+      );
+    }
 
     return user;
   }

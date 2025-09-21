@@ -58,7 +58,22 @@ export class MailboxService {
       expiresAt: dto.expiresAt,
     });
 
-    return this.mailboxRepository.save(mail);
+    const saved = await this.mailboxRepository.save(mail);
+
+    // Emit mailbox socket events so the recipient is notified immediately.
+    try {
+      // emit mailReceived with mail id
+      this.mailboxGateway.emitMailReceived(dto.userId, saved.id);
+      // emit updated unread count
+      const unread = await this.getUnreadCount(dto.userId);
+      this.mailboxGateway.emitUnreadCount(dto.userId, unread);
+    } catch (e) {
+      // Non-fatal: log and continue
+      // eslint-disable-next-line no-console
+      console.error('Failed to emit mailbox events after sendMail', e);
+    }
+
+    return saved;
   }
 
   async getUserMails(userId: number): Promise<Mailbox[]> {

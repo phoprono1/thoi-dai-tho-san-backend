@@ -6,6 +6,9 @@ import {
   Param,
   Put,
   Delete,
+  Query,
+  UseGuards,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,7 +22,7 @@ import { UserPowerService } from '../user-power/user-power.service';
 import { User } from './user.entity';
 import { LevelsService } from '../levels/levels.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
-import { UseGuards, Request } from '@nestjs/common';
+// ...existing imports above include UseGuards and Request
 import * as bcrypt from 'bcrypt';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -68,6 +71,14 @@ export class UsersController {
   })
   findAll(): Promise<User[]> {
     return this.usersService.findAll();
+  }
+
+  @Get('search')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Tìm người dùng theo username (admin dropdown search)' })
+  async search(@Query('q') q: string) {
+    const results = await this.usersService.searchByUsername(q || '');
+    return results.map((u) => ({ id: u.id, username: u.username }));
   }
 
   @Get(':id')

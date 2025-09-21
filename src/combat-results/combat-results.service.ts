@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -83,22 +85,47 @@ export class CombatResultsService {
     }
 
     // Ensure we have the freshest UserStat records in case they were updated
-    // recently (e.g., equip endpoint updated derived stats). Re-fetch stats
-    // for each user to avoid using stale relations from earlier load.
+    // recently (e.g., equip or awaken endpoints updated derived stats).
+    // Use the UserStatsService which centralizes find/create behavior and
+    // returns relations. If a UserStat row is missing create a default one
+    // so the engine never observes an absent/stale default (maxHp=100).
     for (const user of users) {
       try {
-        const freshStats = await this.userStatsRepository.findOne({
-          where: { userId: user.id },
-        });
+        const freshStats = await this.userStatsService.findByUserId(user.id);
         if (freshStats) {
           user.stats = freshStats;
+        } else {
+          // Create a default stats row if missing to avoid falling back to
+          // partial objects or undefined values later in the pipeline.
+          console.warn(
+            `Combat - user ${user.id} has no UserStat, creating default row`,
+          );
+          const created = await this.userStatsService.create({
+            userId: user.id,
+          });
+          user.stats = created;
         }
       } catch (err) {
         console.warn(
-          `Could not refresh stats for user ${user.id}:`,
+          `Could not refresh/create stats for user ${user.id}:`,
           err?.message || err,
         );
       }
+    }
+
+    // Diagnostic: log refreshed stats to help debug incorrect maxHp in combat payload
+    try {
+      console.log(
+        'Debug - startCombat users stats:',
+        users.map((u) => ({
+          id: u.id,
+          username: u.username,
+          maxHp: u.stats?.maxHp,
+          currentHp: u.stats?.currentHp,
+        })),
+      );
+    } catch {
+      // ignore
     }
 
     // Thực hiện combat logic
@@ -357,7 +384,7 @@ export class CombatResultsService {
   async startCombatWithEnemies(
     userIds: number[],
     enemiesTemplates: any[],
-    options?: any,
+    _options?: any,
   ) {
     const users = await this.usersRepository.find({
       where: userIds.map((id) => ({ id })),
@@ -368,8 +395,34 @@ export class CombatResultsService {
       throw new Error('Một số người chơi không tồn tại');
     }
 
+    // avoid unused parameter lint
+    void _options;
+
     // NOTE: stamina is expected to be checked/consumed by caller (e.g., ExploreService)
     // to avoid double-consuming when enqueuing the job. Do not consume here.
+
+    // Ensure freshest stats for this code path as well (startCombatWithEnemies
+    // is used by callers that may not pass through the same stamina/flow).
+    for (const user of users) {
+      try {
+        const freshStats = await this.userStatsService.findByUserId(user.id);
+        if (freshStats) user.stats = freshStats;
+        else {
+          console.warn(
+            `Combat (with enemies) - user ${user.id} missing UserStat, creating default`,
+          );
+          const created = await this.userStatsService.create({
+            userId: user.id,
+          });
+          user.stats = created;
+        }
+      } catch (err) {
+        console.warn(
+          `Could not refresh/create stats for user ${user.id} (with enemies):`,
+          err?.message || err,
+        );
+      }
+    }
 
     // Build internalEnemies similar to processTeamCombat but using monster templates
     const internalEnemies: any[] = [];
@@ -482,6 +535,28 @@ export class CombatResultsService {
         maxHp: user.stats.maxHp,
       })),
     };
+
+    // Diagnostic: log player inputs and finalPlayers from engine
+    try {
+      console.log(
+        'Debug - processTeamCombat players input:',
+        playerInputs.map((p) => ({
+          id: p.id,
+          maxHp: p.stats?.maxHp,
+          currentHp: p.currentHp,
+        })),
+      );
+      console.log(
+        'Debug - processTeamCombat run.finalPlayers:',
+        (run as any).finalPlayers,
+      );
+      console.log(
+        'Debug - processTeamCombat built finalTeamStats.members:',
+        finalTeamStats.members,
+      );
+    } catch (err) {
+      console.warn('Debug log failed:', err);
+    }
 
     const rewards = await this.calculateRewards(
       internalEnemies,
