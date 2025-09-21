@@ -16,6 +16,7 @@ import { User } from '../users/user.entity';
 import { Escrow } from './escrow.entity';
 import { MailboxGateway } from '../mailbox/mailbox.gateway';
 import { UserItem } from '../user-items/user-item.entity';
+import { Item } from '../items/item.entity';
 
 @Injectable()
 export class MarketService {
@@ -214,6 +215,17 @@ export class MarketService {
       if (userItem.userId !== seller.id)
         throw new BadRequestException('Not the owner of the item');
 
+      // Check underlying Item.tradable flag to prevent player-to-player trade if item is locked
+      const item = await queryRunner.manager.findOne(Item, {
+        where: { id: userItem.itemId },
+      });
+      const isTradable = item ? Boolean(item.tradable) : true;
+      if (!isTradable) {
+        throw new BadRequestException(
+          'This item is not tradable between players',
+        );
+      }
+
       const available = userItem.quantity || 0;
       if (available < quantity) {
         throw new BadRequestException('Not enough items to list');
@@ -270,6 +282,16 @@ export class MarketService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
+      // Ensure underlying item is tradable (guard in case admin created a listing via DB)
+      const item = await queryRunner.manager.findOne(Item, {
+        where: { id: listing.itemId },
+      });
+      const isTradable = item ? Boolean(item.tradable) : true;
+      if (!isTradable) {
+        throw new BadRequestException(
+          'Cannot place offer: item is not tradable between players',
+        );
+      }
       // Optionally lock buyer row if multiple concurrent placeOffer calls may race on buyer.gold.
       // We'll lock the buyer row to ensure gold deduction is safe.
       await queryRunner.manager
@@ -402,6 +424,17 @@ export class MarketService {
       if (!listing) throw new NotFoundException('Listing not found');
       if (listing.sellerId !== seller.id)
         throw new BadRequestException('Not the seller');
+
+      // Ensure underlying item is tradable before accepting the offer
+      const item = await queryRunner.manager.findOne(Item, {
+        where: { id: listing.itemId },
+      });
+      const isTradable = item ? Boolean(item.tradable) : true;
+      if (!isTradable) {
+        throw new BadRequestException(
+          'Cannot accept offer: item is not tradable between players',
+        );
+      }
 
       // Mark offer accepted
       offer.accepted = true;

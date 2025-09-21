@@ -9,7 +9,7 @@ import { UserItem } from '../user-items/user-item.entity';
 
 @Module({
   imports: [
-  TypeOrmModule.forFeature([UserStat, UserItem]),
+    TypeOrmModule.forFeature([UserStat, UserItem]),
     UserPowerModule,
     LevelsModule,
   ],

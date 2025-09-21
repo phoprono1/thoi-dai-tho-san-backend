@@ -83,7 +83,9 @@ const ServeStaticDynamic: DynamicModule =
               database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
             }),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: process.env.NODE_ENV === 'development', // Only sync in development
+        // Only enable synchronize when explicitly requested via env var to avoid
+        // accidental schema changes at runtime. Default: false.
+        synchronize: process.env.TYPEORM_SYNCHRONIZE === 'true',
         // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
         logging: process.env.TYPEORM_LOGGING === 'true',
       });

@@ -32,8 +32,8 @@ export class AdvancementService implements OnModuleInit {
     private characterClassService?: CharacterClassService,
     private mailboxGateway?: MailboxGateway,
     private eventsService?: EventsService,
-  private userPowerService?: UserPowerService,
-  private userStatsService?: UserStatsService,
+    private userPowerService?: UserPowerService,
+    private userStatsService?: UserStatsService,
   ) {}
 
   onModuleInit() {

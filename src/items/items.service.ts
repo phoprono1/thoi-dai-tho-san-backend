@@ -102,6 +102,11 @@ export class ItemsService {
       updateData.duration = item.duration;
     }
 
+    // Allow updating tradable flag explicitly
+    if ('tradable' in item && typeof item.tradable === 'boolean') {
+      updateData.tradable = item.tradable;
+    }
+
     // Allow updating the image path (string or explicit null to clear)
     if (
       'image' in item &&

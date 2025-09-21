@@ -75,7 +75,11 @@ export class AdminController {
               await userStatsService.recomputeAndPersistForUser(uid);
               processed++;
             } catch (err: unknown) {
-              console.error('Backfill user failed', uid, (err as any)?.message || err);
+              console.error(
+                'Backfill user failed',
+                uid,
+                (err as any)?.message || err,
+              );
             }
           }
         }

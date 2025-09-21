@@ -167,6 +167,7 @@ export class ItemsController {
         },
         consumableValue: { type: 'number', example: 100 },
         duration: { type: 'number', example: 30 },
+        tradable: { type: 'boolean', example: true },
       },
       required: ['name', 'type', 'rarity'],
     },
@@ -231,6 +232,7 @@ export class ItemsController {
         },
         consumableValue: { type: 'number', example: 100 },
         duration: { type: 'number', example: 30 },
+        tradable: { type: 'boolean', example: true },
       },
     },
   })

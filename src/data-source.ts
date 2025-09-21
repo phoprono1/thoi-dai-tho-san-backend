@@ -27,8 +27,9 @@ export const AppDataSource = new DataSource({
   ...dbConfig,
   entities: [path.resolve(__dirname, '**/*.entity{.ts,.js}')],
   migrations: [path.resolve(__dirname, 'migrations/*{.ts,.js}')],
-  // Only enable synchronize in development to avoid accidental schema changes
-  synchronize: process.env.NODE_ENV === 'development',
+  // Only enable synchronize when explicitly requested via env var to avoid
+  // accidental schema changes at runtime. Default: false.
+  synchronize: process.env.TYPEORM_SYNCHRONIZE === 'true',
   // Control whether migrations should run automatically via env var. In
   // production we prefer explicit migration runs (the start script already
   // runs migrations), but some deployments may set MIGRATIONS_RUN=true.

@@ -42,6 +42,9 @@ export class Item {
   @Column({ type: 'int', nullable: true })
   price: number;
 
+  @Column({ type: 'boolean', default: true })
+  tradable: boolean;
+
   @Column('json', { nullable: true })
   stats: {
     // Base stats

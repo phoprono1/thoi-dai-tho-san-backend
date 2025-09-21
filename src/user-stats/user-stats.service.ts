@@ -42,7 +42,8 @@ export class UserStatsService {
     try {
       const userLevel = userStats.user?.level || 0;
       if (userLevel && this.levelsService) {
-        totalLevelStats = await this.levelsService.getTotalLevelStats(userLevel);
+        totalLevelStats =
+          await this.levelsService.getTotalLevelStats(userLevel);
       }
     } catch (err) {
       // fallback to zero totals
