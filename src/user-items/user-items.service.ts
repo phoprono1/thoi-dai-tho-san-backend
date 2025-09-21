@@ -665,35 +665,16 @@ export class UserItemsService {
           luck: otherStatsUpdate['luck'],
         });
 
-        // Compute and persist combat power for this user
+        // Ensure final recompute and user_power persist via centralized method
         try {
-          // reload updated stats and equipped items
-          const updatedStats = await this.userStatsService.findByUserId(
-            userItem.userId,
-          );
-          const equippedForPower = await this.getEquippedItems(userItem.userId);
-          const power = computeCombatPowerFromStats(
-            updatedStats || {},
-            equippedForPower || [],
-          );
-
-          // upsert into user_power table
-          const existing = await this.dataSource.manager.findOne(UserPower, {
-            where: { userId: userItem.userId },
-          });
-          if (existing) {
-            existing.combatPower = power;
-            await this.dataSource.manager.save(UserPower, existing);
-          } else {
-            const np = this.dataSource.manager.create(UserPower, {
-              userId: userItem.userId,
-              combatPower: power,
-            });
-            await this.dataSource.manager.save(UserPower, np);
+          if (this.userStatsService) {
+            await this.userStatsService.recomputeAndPersistForUser(
+              userItem.userId,
+            );
           }
         } catch (err) {
           console.warn(
-            'Failed to compute/save user power after equip:',
+            'Failed to recompute/save user power after equip:',
             err?.message || err,
           );
         }

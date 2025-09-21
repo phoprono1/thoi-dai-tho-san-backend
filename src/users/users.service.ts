@@ -279,6 +279,15 @@ export class UsersService {
     if (levelStats) {
       // Áp dụng stats level up (bao gồm hồi đầy HP)
       await this.userStatsService.applyLevelUpStats(id, levelStats);
+    } else {
+      // Diagnostic: log when level rows are missing so we can detect seed/migration issues
+      try {
+        console.warn(
+          `Level stats missing for level=${user.level} while leveling user=${id}. This may explain why level buffs (HP/attack/defense) are not applied.`,
+        );
+      } catch {
+        // ignore
+      }
     }
 
     // Lưu user

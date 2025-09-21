@@ -17,6 +17,7 @@ import { UserItem } from '../user-items/user-item.entity';
 import { QuestModule } from '../quests/quest.module';
 import { MailboxModule } from '../mailbox/mailbox.module';
 import { EventsModule } from '../events/events.module';
+import { UserPowerModule } from '../user-power/user-power.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { EventsModule } from '../events/events.module';
     QuestModule,
     MailboxModule,
     EventsModule,
+    UserPowerModule,
   ],
   controllers: [CharacterClassController, MappingsController],
   providers: [CharacterClassService, AdvancementService],

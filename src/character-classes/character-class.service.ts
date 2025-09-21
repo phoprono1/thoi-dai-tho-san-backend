@@ -55,6 +55,10 @@ export class CharacterClassService {
     private dataSource: DataSource,
   ) {}
 
+  // Optional UserPowerService will be injected by the module when available
+  // to allow immediate recompute/persist of user power after class changes.
+  private userPowerService?: import('../user-power/user-power.service').UserPowerService;
+
   async createClass(
     dto: CreateCharacterClassDto,
   ): Promise<CharacterClassResponseDto> {
@@ -520,10 +524,11 @@ export class CharacterClassService {
       userStats.dodgeRate += statChanges.dodgeRate;
       userStats.accuracy += statChanges.accuracy;
 
-      // Recalculate derived stats
-      userStats.maxHp = Math.floor(userStats.vitality * 10);
-      userStats.attack = Math.floor(userStats.strength * 2);
-      userStats.defense = Math.floor(userStats.vitality * 1.5);
+      // NOTE: do not overwrite derived stats here. We must preserve stored
+      // values (which include level-only contributions) so that the later
+      // derivation of "levelOnly" values correctly computes the additive
+      // contribution from levels. The final derived values will be computed
+      // below after item/unequip handling and persisted there.
 
       // After class stat changes and auto-unequip, we must also recalculate
       // derived stats to remove contributions from any unequipped items.
@@ -606,6 +611,7 @@ export class CharacterClassService {
         });
 
         // Compute base derived from class-related stats (strength/vitality)
+        // Use the CURRENT userStats which already included statChanges above.
         const classStrength = userStats.strength || 0;
         const classVitality = userStats.vitality || 0;
 
@@ -613,24 +619,49 @@ export class CharacterClassService {
         const baseDefenseFromClass = Math.floor(classVitality * 1.5);
         const baseMaxHpFromClass = Math.floor(classVitality * 10);
 
-        // Derive level-only contributions by subtracting base and previous item bonuses from stored stats
+        // To preserve level-only contributions we must compute what the base
+        // derived values were BEFORE we applied class statChanges. The
+        // `prevItemsStats` above reflect item contributions before unequip.
+        // Compute previous class-derived bases by subtracting the statChanges
+        // we applied earlier (these are the diffs between new class and old class)
+        // NOTE: statChanges were applied to userStats already, so prevClassDerived
+        // is derived by reversing those deltas from the current attributes.
+        const prevClassStrength = Math.max(
+          0,
+          classStrength - (statChanges.strength || 0),
+        );
+        const prevClassVitality = Math.max(
+          0,
+          classVitality - (statChanges.vitality || 0),
+        );
+
+        const prevBaseAttackFromClass = Math.floor(prevClassStrength * 2);
+        const prevBaseDefenseFromClass = Math.floor(prevClassVitality * 1.5);
+        const prevBaseMaxHpFromClass = Math.floor(prevClassVitality * 10);
+
+        // Stored user-derived values (may include level and item contributions)
         const userAttackVal = userStats.attack || 0;
         const userDefenseVal = userStats.defense || 0;
         const userMaxHpVal = userStats.maxHp || 0;
 
+        // Compute level-only contributions by subtracting previous class base and
+        // previous item bonuses from the stored derived stats. This gives us the
+        // additive amount that originated from levels (and other non-class sources)
         const levelOnlyAttack = Math.max(
           0,
-          userAttackVal - baseAttackFromClass - (prevItemsStats['attack'] || 0),
+          userAttackVal -
+            prevBaseAttackFromClass -
+            (prevItemsStats['attack'] || 0),
         );
         const levelOnlyDefense = Math.max(
           0,
           userDefenseVal -
-            baseDefenseFromClass -
+            prevBaseDefenseFromClass -
             (prevItemsStats['defense'] || 0),
         );
         const levelOnlyMaxHp = Math.max(
           0,
-          userMaxHpVal - baseMaxHpFromClass - (prevItemsStats['hp'] || 0),
+          userMaxHpVal - prevBaseMaxHpFromClass - (prevItemsStats['hp'] || 0),
         );
 
         const newAttack =

@@ -30,6 +30,7 @@ import { QuestModule } from './quests/quest.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
 import { AdminImportModule } from './admin-import/admin-import.module';
+import { AdminModule } from './admin/admin.module';
 import { CommonModule } from './common/common.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
@@ -116,6 +117,7 @@ const ServeStaticDynamic: DynamicModule =
     MonsterModule,
     UploadsModule,
     AdminImportModule,
+    AdminModule,
     MarketModule,
     ExploreModule,
   ],

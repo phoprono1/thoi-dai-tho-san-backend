@@ -8,8 +8,10 @@ import { PendingAdvancement } from './pending-advancement.entity';
 import { User } from '../users/user.entity';
 import { UserStat } from '../user-stats/user-stat.entity';
 import { CharacterClassService } from './character-class.service';
+import { UserPowerService } from '../user-power/user-power.service';
 import { MailboxGateway } from '../mailbox/mailbox.gateway';
 import { EventsService } from '../events/events.module';
+import { UserStatsService } from '../user-stats/user-stats.service';
 
 @Injectable()
 export class AdvancementService implements OnModuleInit {
@@ -30,6 +32,8 @@ export class AdvancementService implements OnModuleInit {
     private characterClassService?: CharacterClassService,
     private mailboxGateway?: MailboxGateway,
     private eventsService?: EventsService,
+  private userPowerService?: UserPowerService,
+  private userStatsService?: UserStatsService,
   ) {}
 
   onModuleInit() {
@@ -140,45 +144,11 @@ export class AdvancementService implements OnModuleInit {
         const userStats = await qr.manager.findOne(UserStat, {
           where: { userId },
         });
+        // Instead of doing ad-hoc derived-field adjustments here, prefer to
+        // centralize stat composition. Save transaction changes and then call
+        // the UserStatsService recompute method (best-effort) so level+class+item
+        // contributions are composed consistently.
         if (userStats) {
-          const oldStats = prevClass?.statBonuses || {};
-          const newStats = targetClass.statBonuses || {};
-          const statChanges = {
-            strength: (newStats.strength || 0) - (oldStats.strength || 0),
-            intelligence:
-              (newStats.intelligence || 0) - (oldStats.intelligence || 0),
-            dexterity: (newStats.dexterity || 0) - (oldStats.dexterity || 0),
-            vitality: (newStats.vitality || 0) - (oldStats.vitality || 0),
-            luck: (newStats.luck || 0) - (oldStats.luck || 0),
-            critRate: (newStats.critRate || 0) - (oldStats.critRate || 0),
-            critDamage: (newStats.critDamage || 0) - (oldStats.critDamage || 0),
-            comboRate: (newStats.comboRate || 0) - (oldStats.comboRate || 0),
-            counterRate:
-              (newStats.counterRate || 0) - (oldStats.counterRate || 0),
-            lifesteal: (newStats.lifesteal || 0) - (oldStats.lifesteal || 0),
-            armorPen: (newStats.armorPen || 0) - (oldStats.armorPen || 0),
-            dodgeRate: (newStats.dodgeRate || 0) - (oldStats.dodgeRate || 0),
-            accuracy: (newStats.accuracy || 0) - (oldStats.accuracy || 0),
-          };
-
-          userStats.strength += statChanges.strength;
-          userStats.intelligence += statChanges.intelligence;
-          userStats.dexterity += statChanges.dexterity;
-          userStats.vitality += statChanges.vitality;
-          userStats.luck += statChanges.luck;
-          userStats.critRate += statChanges.critRate;
-          userStats.critDamage += statChanges.critDamage;
-          userStats.comboRate += statChanges.comboRate;
-          userStats.counterRate += statChanges.counterRate;
-          userStats.lifesteal += statChanges.lifesteal;
-          userStats.armorPen += statChanges.armorPen;
-          userStats.dodgeRate += statChanges.dodgeRate;
-          userStats.accuracy += statChanges.accuracy;
-
-          userStats.maxHp = Math.floor(userStats.vitality * 10);
-          userStats.attack = Math.floor(userStats.strength * 2);
-          userStats.defense = Math.floor(userStats.vitality * 1.5);
-
           await qr.manager.save(userStats);
         }
 
@@ -192,6 +162,18 @@ export class AdvancementService implements OnModuleInit {
 
         await qr.manager.save(history);
         await qr.commitTransaction();
+
+        // Best-effort: run central recompute so stats and user_power are consistent.
+        try {
+          if (this.userStatsService) {
+            await this.userStatsService.recomputeAndPersistForUser(userId);
+          } else if (this.userPowerService) {
+            // fallback: at least recompute user_power
+            await this.userPowerService.computeAndSaveForUser(userId);
+          }
+        } catch (e) {
+          console.warn('Failed to recompute stats after advancement', e);
+        }
 
         // TODO: emit socket event to user to notify class change
         return { applied: true, newClassId: targetClass.id };
