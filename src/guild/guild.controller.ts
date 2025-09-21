@@ -45,11 +45,23 @@ export class GuildController {
     @Request() req,
     @Body() dto: CreateGuildDto,
   ): Promise<Guild> {
-    return await this.guildService.createGuild(
-      req.user.id,
-      dto.name,
-      dto.description,
-    );
+    try {
+      return await this.guildService.createGuild(
+        req.user.id,
+        dto.name,
+        dto.description,
+      );
+    } catch (err) {
+      // Log diagnostic info to help debug production 500s
+      try {
+        const uid = req?.user?.id;
+        // eslint-disable-next-line no-console
+        console.error('[GuildController] createGuild failed', { userId: uid, dto, err });
+      } catch (logErr) {
+        // ignore logging errors
+      }
+      throw err;
+    }
   }
 
   @Post(':guildId/join')

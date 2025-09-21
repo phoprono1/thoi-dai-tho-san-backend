@@ -10,6 +10,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { guildEvents } from './guild.events';
 import { GuildInvitePayload } from './guild.events';
@@ -55,13 +56,11 @@ export class GuildService {
     // We need an atomic operation: deduct 10_000 gold from the creator and create
     // the guild & leader member in a single transaction to avoid money-loss or
     // inconsistent state when errors occur.
-    const queryRunner = this.dataSource
-      ? this.dataSource.createQueryRunner()
-      : // fallback to repository manager if DataSource not injected
-        // (keeps compatibility with older runtime environments)
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        this.guildRepository.manager.connection.createQueryRunner();
+    if (!this.dataSource) {
+      this.logger.error('createGuild: DataSource is not initialized');
+      throw new InternalServerErrorException('Database connection not available');
+    }
+    const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
@@ -371,11 +370,11 @@ export class GuildService {
     approverId: number,
   ): Promise<GuildMember> {
     // Use transaction + row locking to avoid races when approving multiple members
-    const queryRunner = this.dataSource
-      ? this.dataSource.createQueryRunner()
-      : // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        this.guildRepository.manager.connection.createQueryRunner();
+    if (!this.dataSource) {
+      this.logger.error('approveMember: DataSource is not initialized');
+      throw new InternalServerErrorException('Database connection not available');
+    }
+    const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
@@ -958,11 +957,11 @@ export class GuildService {
       clearedUserGuildId: false,
       errors: [],
     };
-    const queryRunner = this.dataSource
-      ? this.dataSource.createQueryRunner()
-      : // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        this.guildRepository.manager.connection.createQueryRunner();
+    if (!this.dataSource) {
+      this.logger.error('_dev_cleanStaleMembership: DataSource is not initialized');
+      throw new InternalServerErrorException('Database connection not available');
+    }
+    const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
