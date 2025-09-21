@@ -95,4 +95,18 @@ export class UserStaminaService {
     stamina.currentStamina = Math.min(stamina.currentStamina, newMax);
     return this.userStaminaRepository.save(stamina);
   }
+
+  /**
+   * Restore current stamina for a user by amount. Persists the change and
+   * updates lastRegenTime to now so passive regen is delayed appropriately.
+   */
+  async restoreStamina(userId: number, amount: number): Promise<UserStamina> {
+    const stamina = await this.getUserStaminaWithoutRegen(userId);
+    stamina.currentStamina = Math.min(
+      stamina.maxStamina,
+      (stamina.currentStamina || 0) + Math.max(0, Math.floor(amount)),
+    );
+    stamina.lastRegenTime = new Date();
+    return this.userStaminaRepository.save(stamina);
+  }
 }

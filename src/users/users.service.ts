@@ -293,6 +293,18 @@ export class UsersService {
     // Lưu user
     await this.usersRepository.save(user);
 
+    // Ensure derived stats are recomputed authoritatively after level up and heal the player.
+    try {
+      await this.userStatsService.recomputeAndPersistForUser(user.id, {
+        fillCurrentHp: true,
+      });
+    } catch (e) {
+      this.logger.warn(
+        'Failed to recompute stats after level up: ' +
+          ((e as Error)?.message || e),
+      );
+    }
+
     // Evaluate possible awakenings/promotions after level up
     try {
       // Emit an event so advancement logic can be handled by a different module

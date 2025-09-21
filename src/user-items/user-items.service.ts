@@ -10,6 +10,7 @@ import { ItemSet } from '../items/item-set.entity';
 import { ItemType, ConsumableType } from '../items/item-types.enum';
 import { UserStatsService } from '../user-stats/user-stats.service';
 import { UsersService } from '../users/users.service';
+import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { computeCombatPowerFromStats } from '../user-power/computeCombatPower';
 import { UserPower } from '../user-power/user-power.entity';
 import { DataSource } from 'typeorm';
@@ -27,6 +28,7 @@ export class UserItemsService {
     private itemsRepository: Repository<Item>,
     private readonly userStatsService: UserStatsService,
     private readonly usersService: UsersService,
+    private readonly userStaminaService: UserStaminaService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -858,19 +860,33 @@ export class UserItemsService {
   }
 
   private useMpPotion(
-    _userItem: UserItem,
-    _user: User,
+    userItem: UserItem,
+    user: User,
   ): Promise<{ success: boolean; message: string; effects: any }> {
-    // MP system chưa được implement, tạm thời return success
-    void _userItem;
-    void _user;
-    return Promise.resolve({
-      success: true,
-      message: 'Tính năng MP potion sẽ được cập nhật sau',
-      effects: {
-        mpRestored: 0,
-      },
-    });
+    // Treat MP potion as Stamina/Energy potion for now. Restore stamina by
+    // consumableValue if present, otherwise default to 10.
+    const amount = userItem.item.consumableValue || 10;
+    return this.userStaminaService
+      .restoreStamina(user.id, amount)
+      .then((stamina) => {
+        return {
+          success: true,
+          message: `Đã hồi ${amount} năng lượng`,
+          effects: {
+            staminaRestored: amount,
+            currentStamina: stamina.currentStamina,
+            maxStamina: stamina.maxStamina,
+          },
+        };
+      })
+      .catch((err) => {
+        console.warn('Failed to restore stamina via MP potion:', err);
+        return {
+          success: false,
+          message: 'Không thể sử dụng bình năng lượng lúc này',
+          effects: { error: String(err) },
+        };
+      });
   }
 
   private async useExpPotion(

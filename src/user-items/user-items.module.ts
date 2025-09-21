@@ -9,6 +9,7 @@ import { Item } from '../items/item.entity';
 import { UserStatsModule } from '../user-stats/user-stats.module';
 import { UsersModule } from '../users/users.module';
 import { LevelsModule } from '../levels/levels.module';
+import { UserStaminaModule } from '../user-stamina/user-stamina.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LevelsModule } from '../levels/levels.module';
     UserStatsModule,
     UsersModule,
     LevelsModule,
+    UserStaminaModule,
   ],
   controllers: [UserItemsController],
   providers: [UserItemsService],
