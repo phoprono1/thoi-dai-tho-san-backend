@@ -15,6 +15,8 @@ export enum ClassType {
   ASSASSIN = 'assassin',
   PRIEST = 'priest',
   KNIGHT = 'knight',
+  TANK = 'tank',
+  HEALER = 'healer',
   SUMMONER = 'summoner',
   NECROMANCER = 'necromancer',
 }

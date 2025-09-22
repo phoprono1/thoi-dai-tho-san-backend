@@ -14,6 +14,7 @@ import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { computeCombatPowerFromStats } from '../user-power/computeCombatPower';
 import { UserPower } from '../user-power/user-power.entity';
 import { DataSource } from 'typeorm';
+import { ClassType } from '../character-classes/character-class.entity';
 
 @Injectable()
 export class UserItemsService {
@@ -370,18 +371,34 @@ export class UserItemsService {
               classRestrictions.allowedClassTypes.length > 0 &&
               !classRestrictions.allowedClassTypes.includes(userType)
             ) {
-              throw new BadRequestException(
-                'Lớp nhân vật của bạn không được phép trang bị vật phẩm này',
+              // Check if user type has equivalent types (e.g., knight = tank, priest = healer)
+              const equivalentTypes = this.getEquivalentClassTypes(userType);
+              const hasAllowedType = equivalentTypes.some((type) =>
+                classRestrictions.allowedClassTypes.includes(type as ClassType),
               );
+              if (!hasAllowedType) {
+                throw new BadRequestException(
+                  'Lớp nhân vật của bạn không được phép trang bị vật phẩm này',
+                );
+              }
             }
             if (
               Array.isArray(classRestrictions.restrictedClassTypes) &&
               classRestrictions.restrictedClassTypes.length > 0 &&
               classRestrictions.restrictedClassTypes.includes(userType)
             ) {
-              throw new BadRequestException(
-                'Lớp nhân vật của bạn bị hạn chế sử dụng vật phẩm này',
+              // Check if user type has equivalent types that are restricted
+              const equivalentTypes = this.getEquivalentClassTypes(userType);
+              const isRestricted = equivalentTypes.some((type) =>
+                classRestrictions.restrictedClassTypes.includes(
+                  type as ClassType,
+                ),
               );
+              if (isRestricted) {
+                throw new BadRequestException(
+                  'Lớp nhân vật của bạn bị hạn chế sử dụng vật phẩm này',
+                );
+              }
             }
           }
         }
@@ -1038,5 +1055,15 @@ export class UserItemsService {
         },
       },
     };
+  }
+
+  private getEquivalentClassTypes(userType: string): string[] {
+    const equivalents: Record<string, string[]> = {
+      knight: ['knight', 'tank'],
+      priest: ['priest', 'healer'],
+      tank: ['tank', 'knight'],
+      healer: ['healer', 'priest'],
+    };
+    return equivalents[userType] || [userType];
   }
 }
