@@ -144,11 +144,44 @@ export class AdvancementService implements OnModuleInit {
         const userStats = await qr.manager.findOne(UserStat, {
           where: { userId },
         });
-        // Instead of doing ad-hoc derived-field adjustments here, prefer to
-        // centralize stat composition. Save transaction changes and then call
-        // the UserStatsService recompute method (best-effort) so level+class+item
-        // contributions are composed consistently.
+        // Apply statBonuses delta for awakening (similar to promotion)
         if (userStats) {
+          const oldS = prevClass?.statBonuses || {};
+          const newS = targetClass.statBonuses || {};
+          const delta = {
+            strength: (newS.strength || 0) - (oldS.strength || 0),
+            intelligence: (newS.intelligence || 0) - (oldS.intelligence || 0),
+            dexterity: (newS.dexterity || 0) - (oldS.dexterity || 0),
+            vitality: (newS.vitality || 0) - (oldS.vitality || 0),
+            luck: (newS.luck || 0) - (oldS.luck || 0),
+            critRate: (newS.critRate || 0) - (oldS.critRate || 0),
+            critDamage: (newS.critDamage || 0) - (oldS.critDamage || 0),
+            comboRate: (newS.comboRate || 0) - (oldS.comboRate || 0),
+            counterRate: (newS.counterRate || 0) - (oldS.counterRate || 0),
+            lifesteal: (newS.lifesteal || 0) - (oldS.lifesteal || 0),
+            armorPen: (newS.armorPen || 0) - (oldS.armorPen || 0),
+            dodgeRate: (newS.dodgeRate || 0) - (oldS.dodgeRate || 0),
+            accuracy: (newS.accuracy || 0) - (oldS.accuracy || 0),
+          };
+
+          userStats.strength += delta.strength;
+          userStats.intelligence += delta.intelligence;
+          userStats.dexterity += delta.dexterity;
+          userStats.vitality += delta.vitality;
+          userStats.luck += delta.luck;
+          userStats.critRate += delta.critRate;
+          userStats.critDamage += delta.critDamage;
+          userStats.comboRate += delta.comboRate;
+          userStats.counterRate += delta.counterRate;
+          userStats.lifesteal += delta.lifesteal;
+          userStats.armorPen += delta.armorPen;
+          userStats.dodgeRate += delta.dodgeRate;
+          userStats.accuracy += delta.accuracy;
+
+          userStats.maxHp = Math.floor(userStats.vitality * 10);
+          userStats.attack = Math.floor(userStats.strength * 2);
+          userStats.defense = Math.floor(userStats.vitality * 1.5);
+
           await qr.manager.save(userStats);
         }
 
@@ -163,16 +196,15 @@ export class AdvancementService implements OnModuleInit {
         await qr.manager.save(history);
         await qr.commitTransaction();
 
-        // Best-effort: run central recompute so stats and user_power are consistent.
+        // Note: Equip doesn't change on advancement, so no need to recompute stats.
+        // Update direct above is sufficient.
+        // Best-effort: recompute user_power only.
         try {
-          if (this.userStatsService) {
-            await this.userStatsService.recomputeAndPersistForUser(userId);
-          } else if (this.userPowerService) {
-            // fallback: at least recompute user_power
+          if (this.userPowerService) {
             await this.userPowerService.computeAndSaveForUser(userId);
           }
         } catch (e) {
-          console.warn('Failed to recompute stats after advancement', e);
+          console.warn('Failed to recompute power after advancement', e);
         }
 
         // TODO: emit socket event to user to notify class change

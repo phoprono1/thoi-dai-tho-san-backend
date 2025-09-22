@@ -206,7 +206,7 @@ export class UserStatsService {
           if (!set) return;
           const bonuses: any[] = (set.setBonuses as any[]) || [];
           type Bonus = {
-            pieces: number;
+            pieces?: number;
             type?: string;
             stats?: Record<string, number>;
           };
@@ -215,7 +215,7 @@ export class UserStatsService {
             const bonus = b as Bonus;
             if (!bonus || typeof bonus.pieces !== 'number') return;
             if (bonus.pieces <= count) {
-              if (!best || bonus.pieces > best.pieces) best = bonus;
+              if (!best || bonus.pieces > best.pieces) best = b;
             }
           });
           if (!best) return;
@@ -244,10 +244,7 @@ export class UserStatsService {
           `SELECT ui.upgrade_stats, i.stats, i.set_id FROM user_item ui JOIN item i ON i.id = ui.item_id WHERE ui.user_id = $1 AND ui.is_equipped = true`,
           [userId],
         );
-        const setIds2 = rows2
-          .map((r) => r.set_id)
-          .filter((s) => !!s)
-          .map((s) => Number(s));
+        const setIds2 = rows2.map((r) => r.set_id).filter((s) => Number(s));
         if (setIds2.length > 0) {
           const sets = await this.userItemRepository.manager.findByIds(
             ItemSet,
@@ -270,7 +267,11 @@ export class UserStatsService {
               type?: string;
               stats?: Record<string, number>;
             }>;
-            let best: { pieces: number; type?: string; stats?: Record<string, number> } | null = null;
+            let best: {
+              pieces: number;
+              type?: string;
+              stats?: Record<string, number>;
+            } | null = null;
             bonuses.forEach((b) => {
               if (!b || typeof b.pieces !== 'number') return;
               if (b.pieces <= count) {
@@ -299,22 +300,24 @@ export class UserStatsService {
       // ignore fallback errors; we already have best-effort above
     }
 
-    // Determine attribute values without items by subtracting item-contributed attributes
-    const attrWithoutItems = {
-      strength: Math.max(
-        0,
-        (userStats.strength || 0) - (itemsStats['strength'] || 0),
-      ),
-      vitality: Math.max(
-        0,
-        (userStats.vitality || 0) - (itemsStats['vitality'] || 0),
-      ),
-    };
+    // Get class bonuses from user.characterClass.statBonuses
+    const classBonuses =
+      (userStats.user?.characterClass?.statBonuses as Record<string, number>) ||
+      {};
 
-    // Compute class-derived base from attributes (attributes excluding item bonuses)
-    const baseAttackFromClass = Math.floor(attrWithoutItems.strength * 2);
-    const baseDefenseFromClass = Math.floor(attrWithoutItems.vitality * 1.5);
-    const baseMaxHpFromClass = Math.floor(attrWithoutItems.vitality * 10);
+    // Compute attributes: class bonuses + item bonuses
+    const strength = (classBonuses.strength || 0) + (itemsStats.strength || 0);
+    const vitality = (classBonuses.vitality || 0) + (itemsStats.vitality || 0);
+    const intelligence =
+      (classBonuses.intelligence || 0) + (itemsStats.intelligence || 0);
+    const dexterity =
+      (classBonuses.dexterity || 0) + (itemsStats.dexterity || 0);
+    const luck = (classBonuses.luck || 0) + (itemsStats.luck || 0);
+
+    // Compute class-derived base from attributes
+    const baseAttackFromClass = Math.floor(strength * 2);
+    const baseDefenseFromClass = Math.floor(vitality * 1.5);
+    const baseMaxHpFromClass = Math.floor(vitality * 10);
 
     // Recompute authoritative totals: base + totalLevelStats + class-derived + item contributions
     const newAttack =
@@ -351,6 +354,7 @@ export class UserStatsService {
           userLevel: userStats.user?.level,
           totalLevelStats,
           base,
+          classBonuses,
           baseAttackFromClass,
           baseDefenseFromClass,
           itemsAttack: itemsStats['attack'],
@@ -377,32 +381,22 @@ export class UserStatsService {
 
     userStats.maxHp = Math.max(1, newMaxHp);
 
-    // Do not forcibly refill currentHp to max during backfill. Only adjust if
-    // currentHp is missing/null or exceeds the newly computed max (clamp).
-    const userStatsRecord = userStats as unknown as Record<string, number>;
-    const otherUpdates: Record<string, number> = {};
-    STAT_KEYS.forEach((k) => {
-      if (k === 'attack' || k === 'defense' || k === 'hp') return;
-      const before = Number(userStatsRecord[k] || 0);
-      const prevItemPart = 0; // we can't reliably know previous items in a backfill, so compute conservatively
-      const nowItemPart = itemsStats[k] || 0;
-      otherUpdates[k] = Math.max(0, before - prevItemPart + nowItemPart);
-    });
+    // Update attributes with class + items
+    userStats.strength = Math.max(0, strength);
+    userStats.vitality = Math.max(0, vitality);
+    userStats.intelligence = Math.max(0, intelligence);
+    userStats.dexterity = Math.max(0, dexterity);
+    userStats.luck = Math.max(0, luck);
 
-    // Apply other updates into userStats
-    userStats.critRate = otherUpdates['critRate'];
-    userStats.critDamage = otherUpdates['critDamage'];
-    userStats.comboRate = otherUpdates['comboRate'];
-    userStats.counterRate = otherUpdates['counterRate'];
-    userStats.lifesteal = otherUpdates['lifesteal'];
-    userStats.armorPen = otherUpdates['armorPen'];
-    userStats.dodgeRate = otherUpdates['dodgeRate'];
-    userStats.accuracy = otherUpdates['accuracy'];
-    userStats.strength = otherUpdates['strength'];
-    userStats.intelligence = otherUpdates['intelligence'];
-    userStats.dexterity = otherUpdates['dexterity'];
-    userStats.vitality = otherUpdates['vitality'];
-    userStats.luck = otherUpdates['luck'];
+    // Update other stats from items only
+    userStats.critRate = Math.max(0, itemsStats['critRate'] || 0);
+    userStats.critDamage = Math.max(0, itemsStats['critDamage'] || 0);
+    userStats.comboRate = Math.max(0, itemsStats['comboRate'] || 0);
+    userStats.counterRate = Math.max(0, itemsStats['counterRate'] || 0);
+    userStats.lifesteal = Math.max(0, itemsStats['lifesteal'] || 0);
+    userStats.armorPen = Math.max(0, itemsStats['armorPen'] || 0);
+    userStats.dodgeRate = Math.max(0, itemsStats['dodgeRate'] || 0);
+    userStats.accuracy = Math.max(0, itemsStats['accuracy'] || 0);
 
     // Adjust currentHp: preserve previous proportion of maxHp where possible
     if (options && options.fillCurrentHp) {
@@ -444,7 +438,7 @@ export class UserStatsService {
   findByUserId(userId: number): Promise<UserStat | null> {
     return this.userStatsRepository.findOne({
       where: { userId },
-      relations: ['user'],
+      relations: ['user', 'user.characterClass'],
     });
   }
 
@@ -480,37 +474,6 @@ export class UserStatsService {
 
   async remove(id: number): Promise<void> {
     await this.userStatsRepository.delete(id);
-  }
-
-  // Cập nhật stats khi level up (Additive system)
-  async applyLevelUpStats(
-    userId: number,
-    levelStats: {
-      maxHp: number;
-      attack: number;
-      defense: number;
-    },
-  ): Promise<UserStat | null> {
-    const userStats = await this.findByUserId(userId);
-    if (!userStats) return null;
-
-    // Cộng thêm stats từ level mới
-    userStats.maxHp += levelStats.maxHp;
-    userStats.attack += levelStats.attack;
-    userStats.defense += levelStats.defense;
-
-    // Hồi đầy HP khi level up
-    userStats.currentHp = userStats.maxHp;
-
-    await this.userStatsRepository.save(userStats);
-    try {
-      if (userStats.userId) {
-        await this.userPowerService.computeAndSaveForUser(userStats.userId);
-      }
-    } catch {
-      // continue
-    }
-    return userStats;
   }
 
   // Reset và tính lại toàn bộ stats từ đầu (cho trường hợp cần sync)

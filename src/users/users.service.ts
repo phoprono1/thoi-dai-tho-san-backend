@@ -259,42 +259,43 @@ export class UsersService {
       throw new Error('User not found');
     }
 
-    // Lấy thông tin level tiếp theo
-    const nextLevel = await this.levelsService.getNextLevel(user.level);
-    if (!nextLevel) {
-      throw new Error('Max level reached');
-    }
+    const originalLevel = user.level;
 
-    // Kiểm tra có đủ kinh nghiệm không
-    if (user.experience < nextLevel.experienceRequired) {
-      throw new Error('Not enough experience to level up');
-    }
-
-    // Tăng level và reset experience
-    user.level += 1;
-    user.experience = 0; // Reset experience về 0
-
-    // Lấy stats của level mới
-    const levelStats = await this.levelsService.getLevelStats(user.level);
-    if (levelStats) {
-      // Áp dụng stats level up (bao gồm hồi đầy HP)
-      await this.userStatsService.applyLevelUpStats(id, levelStats);
-    } else {
-      // Diagnostic: log when level rows are missing so we can detect seed/migration issues
-      try {
-        console.warn(
-          `Level stats missing for level=${user.level} while leveling user=${id}. This may explain why level buffs (HP/attack/defense) are not applied.`,
-        );
-      } catch {
-        // ignore
+    // Loop to level up multiple times if exp allows
+    while (true) {
+      // Lấy thông tin level tiếp theo
+      const nextLevel = await this.levelsService.getNextLevel(user.level);
+      if (!nextLevel) {
+        break; // Max level reached
       }
+
+      // Kiểm tra có đủ kinh nghiệm không
+      if (user.experience < nextLevel.experienceRequired) {
+        break; // Not enough exp
+      }
+
+      // Tăng level và trừ experience cần thiết
+      user.level += 1;
+      user.experience -= nextLevel.experienceRequired;
+
+      // Lưu user trước để update level
+      await this.usersRepository.save(user);
+
+      // Tính lại toàn bộ stats sau khi level up
+      await this.userStatsService.recomputeAndPersistForUser(id, {
+        fillCurrentHp: true,
+      });
+    }
+
+    if (user.level === originalLevel) {
+      throw new Error('Not enough experience to level up');
     }
 
     // Lưu user
     await this.usersRepository.save(user);
 
     // Ensure derived stats are recomputed authoritatively after level up and heal the player.
-    // Note: Since equip doesn't change on level up, we don't need to recompute stats here.
+    // Note: Since equip doesn't change on level up, we don't need to recompute stats.
     // applyLevelUpStats has already updated the userStats correctly.
     // Recomputation is only needed when equip changes.
     // try {
@@ -320,26 +321,32 @@ export class UsersService {
     //   );
     // }
 
+    // try {
+    //   await this.userPowerService.computeAndSaveForUser(user.id);
+    // } catch (err) {
+    //   this.logger.error('Failed to compute user_power after level up', err);
+    // }
+
     // Evaluate possible awakenings/promotions after level up
-    try {
-      // Emit an event so advancement logic can be handled by a different module
-      try {
-        this.eventsService.emit('user.levelUp', {
-          userId: user.id,
-          oldLevel: user.level - 1,
-          newLevel: user.level,
-        });
-      } catch (err) {
-        this.logger.error(
-          'Failed to emit levelUp event: ' + (err as Error).message,
-        );
-      }
-    } catch (err) {
-      this.logger.error(
-        'Failed to evaluate advancement after level up: ' +
-          (err as Error).message,
-      );
-    }
+    // try {
+    //   // Emit an event so advancement logic can be handled by a different module
+    //   try {
+    //     this.eventsService.emit('user.levelUp', {
+    //       userId: user.id,
+    //       oldLevel: user.level - 1,
+    //       newLevel: user.level,
+    //     });
+    //   } catch (err) {
+    //     this.logger.error(
+    //       'Failed to emit levelUp event: ' + (err as Error).message,
+    //     );
+    //   }
+    // } catch (err) {
+    //   this.logger.error(
+    //     'Failed to evaluate advancement after level up: ' +
+    //       (err as Error).message,
+    //   );
+    // }
 
     return user;
   }

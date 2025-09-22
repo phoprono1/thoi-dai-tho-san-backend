@@ -26,6 +26,7 @@ import {
 } from '../combat-results/combat-result.entity';
 import { UserItem } from '../user-items/user-item.entity';
 import { QuestService } from '../quests/quest.service';
+import { UserStatsService } from '../user-stats/user-stats.service';
 import {
   CreateCharacterClassDto,
   CharacterClassResponseDto,
@@ -52,6 +53,7 @@ export class CharacterClassService {
     @InjectRepository(UserItem)
     private userItemRepository: Repository<UserItem>,
     private questService: QuestService,
+    private userStatsService: UserStatsService,
     private dataSource: DataSource,
   ) {}
 
@@ -340,24 +342,22 @@ export class CharacterClassService {
         }
       }
 
-      // Calculate stat changes
-      const oldStats = user.characterClass?.statBonuses || {};
+      // Calculate stat changes (additive bonuses)
       const newStats = targetClass.statBonuses;
       const statChanges = {
-        strength: (newStats.strength || 0) - (oldStats.strength || 0),
-        intelligence:
-          (newStats.intelligence || 0) - (oldStats.intelligence || 0),
-        dexterity: (newStats.dexterity || 0) - (oldStats.dexterity || 0),
-        vitality: (newStats.vitality || 0) - (oldStats.vitality || 0),
-        luck: (newStats.luck || 0) - (oldStats.luck || 0),
-        critRate: (newStats.critRate || 0) - (oldStats.critRate || 0),
-        critDamage: (newStats.critDamage || 0) - (oldStats.critDamage || 0),
-        comboRate: (newStats.comboRate || 0) - (oldStats.comboRate || 0),
-        counterRate: (newStats.counterRate || 0) - (oldStats.counterRate || 0),
-        lifesteal: (newStats.lifesteal || 0) - (oldStats.lifesteal || 0),
-        armorPen: (newStats.armorPen || 0) - (oldStats.armorPen || 0),
-        dodgeRate: (newStats.dodgeRate || 0) - (oldStats.dodgeRate || 0),
-        accuracy: (newStats.accuracy || 0) - (oldStats.accuracy || 0),
+        strength: newStats.strength || 0,
+        intelligence: newStats.intelligence || 0,
+        dexterity: newStats.dexterity || 0,
+        vitality: newStats.vitality || 0,
+        luck: newStats.luck || 0,
+        critRate: newStats.critRate || 0,
+        critDamage: newStats.critDamage || 0,
+        comboRate: newStats.comboRate || 0,
+        counterRate: newStats.counterRate || 0,
+        lifesteal: newStats.lifesteal || 0,
+        armorPen: newStats.armorPen || 0,
+        dodgeRate: newStats.dodgeRate || 0,
+        accuracy: newStats.accuracy || 0,
       };
 
       // Debug: log stat bonus details to help trace why client doesn't see buffs
@@ -365,7 +365,6 @@ export class CharacterClassService {
         console.log(
           `performAdvancement user=${dto.userId} targetClass=${targetClass.id}:${targetClass.name}`,
         );
-        console.log('oldStats:', JSON.stringify(oldStats));
         console.log('newStats:', JSON.stringify(newStats));
         console.log('computed statChanges:', JSON.stringify(statChanges));
       } catch (e) {
@@ -376,97 +375,16 @@ export class CharacterClassService {
       user.characterClass = targetClass;
       await queryRunner.manager.save(user);
 
-      // Auto-unequip incompatible items: find currently equipped items and
-      // unequip those that violate classRestrictions for the newly assigned class.
+      // Auto-unequip incompatible items
       const currentlyEquipped: UserItem[] = await queryRunner.manager.find(
         UserItem,
         {
           where: { userId: dto.userId, isEquipped: true },
-          relations: ['item', 'item.itemSet'],
+          relations: ['item'],
         },
       );
 
-      // Build previous items stats map (to allow level-only contribution derivation)
-      const STAT_KEYS = [
-        'attack',
-        'defense',
-        'hp',
-        'critRate',
-        'critDamage',
-        'comboRate',
-        'counterRate',
-        'lifesteal',
-        'armorPen',
-        'dodgeRate',
-        'accuracy',
-        'strength',
-        'intelligence',
-        'dexterity',
-        'vitality',
-        'luck',
-      ];
-
-      const prevItemsStats: Record<string, number> = {};
-      STAT_KEYS.forEach((k) => (prevItemsStats[k] = 0));
-
-      const prevSetsMap: Record<number, { set: any; count: number }> = {};
-      currentlyEquipped.forEach((ui) => {
-        const it = ui.item as any;
-        const its = (it?.stats || {}) as Record<string, number>;
-        const up = (ui.upgradeStats || {}) as Record<string, number>;
-        STAT_KEYS.forEach((k) => {
-          prevItemsStats[k] += Number(its[k] || 0) + Number(up[k] || 0);
-        });
-        const set = it?.itemSet;
-        if (set && set.id) {
-          if (!prevSetsMap[set.id]) prevSetsMap[set.id] = { set, count: 0 };
-          prevSetsMap[set.id].count++;
-        }
-      });
-
-      const prevSetFlat: Record<string, number> = {};
-      const prevSetPercent: Record<string, number> = {};
-      STAT_KEYS.forEach((k) => {
-        prevSetFlat[k] = 0;
-        prevSetPercent[k] = 0;
-      });
-
-      Object.values(prevSetsMap).forEach(({ set, count }) => {
-        const bonuses: any[] = (set.setBonuses as any[]) || [];
-        let best: any | null = null;
-        bonuses.forEach((b) => {
-          if (!b || typeof b.pieces !== 'number') return;
-          if (b.pieces <= count) {
-            if (!best || b.pieces > best.pieces) best = b;
-          }
-        });
-        if (!best) return;
-        const stats = best.stats || {};
-        const btype = (best.type || 'flat').toString();
-        Object.entries(stats).forEach(([statKey, val]) => {
-          const num = Number(val || 0);
-          if (Number.isNaN(num) || num === 0) return;
-          if (btype === 'flat') {
-            prevSetFlat[statKey] = (prevSetFlat[statKey] || 0) + num;
-          } else {
-            prevSetPercent[statKey] = (prevSetPercent[statKey] || 0) + num;
-          }
-        });
-      });
-
-      Object.keys(prevSetFlat).forEach((k) => {
-        prevItemsStats[k] = (prevItemsStats[k] || 0) + (prevSetFlat[k] || 0);
-      });
-      Object.keys(prevSetPercent).forEach((k) => {
-        const pct = prevSetPercent[k] || 0;
-        if (pct !== 0) {
-          const baseVal = prevItemsStats[k] || 0;
-          prevItemsStats[k] = Math.floor(baseVal + (baseVal * pct) / 100);
-        }
-      });
-
       const unequippedIds: number[] = [];
-
       for (const ui of currentlyEquipped) {
         const item = ui.item as any;
         const classRestrictions = item?.classRestrictions || {};
@@ -507,226 +425,6 @@ export class CharacterClassService {
         }
       }
 
-      // Update user stats with class bonuses
-      userStats.strength += statChanges.strength;
-      userStats.intelligence += statChanges.intelligence;
-      userStats.dexterity += statChanges.dexterity;
-      userStats.vitality += statChanges.vitality;
-      userStats.luck += statChanges.luck;
-
-      // Update advanced stats
-      userStats.critRate += statChanges.critRate;
-      userStats.critDamage += statChanges.critDamage;
-      userStats.comboRate += statChanges.comboRate;
-      userStats.counterRate += statChanges.counterRate;
-      userStats.lifesteal += statChanges.lifesteal;
-      userStats.armorPen += statChanges.armorPen;
-      userStats.dodgeRate += statChanges.dodgeRate;
-      userStats.accuracy += statChanges.accuracy;
-
-      // NOTE: do not overwrite derived stats here. We must preserve stored
-      // values (which include level-only contributions) so that the later
-      // derivation of "levelOnly" values correctly computes the additive
-      // contribution from levels. The final derived values will be computed
-      // below after item/unequip handling and persisted there.
-
-      // After class stat changes and auto-unequip, we must also recalculate
-      // derived stats to remove contributions from any unequipped items.
-      // Recompute item bonuses from currently equipped items (post-unequip).
-      try {
-        const equippedAfter: UserItem[] = await queryRunner.manager.find(
-          UserItem,
-          {
-            where: { userId: dto.userId, isEquipped: true },
-            relations: ['item', 'item.itemSet'],
-          },
-        );
-
-        // STAT KEYS used by item stats (kept small to match user-items service)
-        const STAT_KEYS = [
-          'attack',
-          'defense',
-          'hp',
-          'critRate',
-          'critDamage',
-          'comboRate',
-          'counterRate',
-          'lifesteal',
-          'armorPen',
-          'dodgeRate',
-          'accuracy',
-          'strength',
-          'intelligence',
-          'dexterity',
-          'vitality',
-          'luck',
-        ];
-
-        const itemsStats: Record<string, number> = {};
-        STAT_KEYS.forEach((k) => (itemsStats[k] = 0));
-
-        equippedAfter.forEach((ui) => {
-          const it = ui.item as any;
-          const its = (it?.stats || {}) as Record<string, number>;
-          const up = (ui.upgradeStats || {}) as Record<string, number>;
-          STAT_KEYS.forEach((k) => {
-            itemsStats[k] += Number(its[k] || 0) + Number(up[k] || 0);
-          });
-        });
-
-        // simple set-bonus application (flat only) - match user-items behavior enough
-        const setsMap: Record<number, { set: any; count: number }> = {};
-        equippedAfter.forEach((ui) => {
-          const set = (ui.item as any)?.itemSet;
-          if (set && set.id) {
-            if (!setsMap[set.id]) setsMap[set.id] = { set, count: 0 };
-            setsMap[set.id].count++;
-          }
-        });
-
-        Object.values(setsMap).forEach(({ set, count }) => {
-          const bonuses = (set.setBonuses || []) as Array<any>;
-          let best: any = null;
-          bonuses.forEach((b) => {
-            if (!b || typeof b.pieces !== 'number') return;
-            if (b.pieces <= count) {
-              if (!best || b.pieces > best.pieces) best = b;
-            }
-          });
-          if (!best) return;
-          const stats = best.stats || {};
-          const btype = (best.type || 'flat').toString();
-          Object.entries(stats).forEach(([statKey, val]) => {
-            const num = Number(val || 0);
-            if (Number.isNaN(num) || num === 0) return;
-            if (btype === 'flat') {
-              itemsStats[statKey] = (itemsStats[statKey] || 0) + num;
-            } else {
-              const baseVal = itemsStats[statKey] || 0;
-              itemsStats[statKey] = Math.floor(
-                baseVal + (baseVal * Number(val)) / 100,
-              );
-            }
-          });
-        });
-
-        // Compute base derived from class-related stats (strength/vitality)
-        // Use the CURRENT userStats which already included statChanges above.
-        const classStrength = userStats.strength || 0;
-        const classVitality = userStats.vitality || 0;
-
-        const baseAttackFromClass = Math.floor(classStrength * 2);
-        const baseDefenseFromClass = Math.floor(classVitality * 1.5);
-        const baseMaxHpFromClass = Math.floor(classVitality * 10);
-
-        // To preserve level-only contributions we must compute what the base
-        // derived values were BEFORE we applied class statChanges. The
-        // `prevItemsStats` above reflect item contributions before unequip.
-        // Compute previous class-derived bases by subtracting the statChanges
-        // we applied earlier (these are the diffs between new class and old class)
-        // NOTE: statChanges were applied to userStats already, so prevClassDerived
-        // is derived by reversing those deltas from the current attributes.
-        const prevClassStrength = Math.max(
-          0,
-          classStrength - (statChanges.strength || 0),
-        );
-        const prevClassVitality = Math.max(
-          0,
-          classVitality - (statChanges.vitality || 0),
-        );
-
-        const prevBaseAttackFromClass = Math.floor(prevClassStrength * 2);
-        const prevBaseDefenseFromClass = Math.floor(prevClassVitality * 1.5);
-        const prevBaseMaxHpFromClass = Math.floor(prevClassVitality * 10);
-
-        // Stored user-derived values (may include level and item contributions)
-        const userAttackVal = userStats.attack || 0;
-        const userDefenseVal = userStats.defense || 0;
-        const userMaxHpVal = userStats.maxHp || 0;
-
-        // Compute level-only contributions by subtracting previous class base and
-        // previous item bonuses from the stored derived stats. This gives us the
-        // additive amount that originated from levels (and other non-class sources)
-        const levelOnlyAttack = Math.max(
-          0,
-          userAttackVal -
-            prevBaseAttackFromClass -
-            (prevItemsStats['attack'] || 0),
-        );
-        const levelOnlyDefense = Math.max(
-          0,
-          userDefenseVal -
-            prevBaseDefenseFromClass -
-            (prevItemsStats['defense'] || 0),
-        );
-        const levelOnlyMaxHp = Math.max(
-          0,
-          userMaxHpVal - prevBaseMaxHpFromClass - (prevItemsStats['hp'] || 0),
-        );
-
-        const newAttack =
-          baseAttackFromClass + levelOnlyAttack + (itemsStats['attack'] || 0);
-        const newDefense =
-          baseDefenseFromClass +
-          levelOnlyDefense +
-          (itemsStats['defense'] || 0);
-        const newMaxHp =
-          baseMaxHpFromClass + levelOnlyMaxHp + (itemsStats['hp'] || 0);
-
-        // update userStats derived values
-        userStats.attack = newAttack;
-        userStats.defense = newDefense;
-        userStats.maxHp = newMaxHp;
-        userStats.currentHp = newMaxHp;
-
-        // Update other stats by removing previous item contributions and adding current ones
-        const userStatsRecord = userStats as unknown as Record<string, number>;
-        const otherKeys = [
-          'strength',
-          'intelligence',
-          'dexterity',
-          'vitality',
-          'luck',
-          'critRate',
-          'critDamage',
-          'comboRate',
-          'counterRate',
-          'lifesteal',
-          'armorPen',
-          'dodgeRate',
-          'accuracy',
-        ];
-        otherKeys.forEach((k) => {
-          const before = Number(userStatsRecord[k] || 0);
-          const prev = prevItemsStats[k] || 0;
-          const now = itemsStats[k] || 0;
-          const updated = Math.max(0, before - prev + now);
-          // assign back
-          userStats[k] = updated;
-        });
-      } catch (e) {
-        // If anything goes wrong with recompute, fall back to previously computed derived stats
-        console.warn(
-          'Failed to recompute item-derived stats after advancement:',
-          e?.message || e,
-        );
-      }
-
-      await queryRunner.manager.save(userStats);
-
-      // Log the saved userStats row for verification
-      try {
-        const saved = await queryRunner.manager.findOne(UserStat, {
-          where: { userId: dto.userId },
-        });
-        console.log(
-          `Saved userStats for user=${dto.userId}:`,
-          JSON.stringify(saved),
-        );
-      } catch (e) {
-        console.warn('Could not read back saved userStats for logging', e);
-      }
-
       // Create advancement record
       const advancement = queryRunner.manager.create(CharacterAdvancement, {
         userId: dto.userId,
@@ -743,6 +441,30 @@ export class CharacterClassService {
       await queryRunner.manager.save(advancement);
 
       await queryRunner.commitTransaction();
+
+      // Recompute stats using centralized service AFTER transaction commit
+      // to ensure class bonuses are loaded correctly from the updated user record
+      try {
+        await this.userStatsService.recomputeAndPersistForUser(dto.userId);
+      } catch (e) {
+        console.warn(
+          'Failed to recompute stats after advancement:',
+          e?.message || e,
+        );
+      }
+
+      // Log the saved userStats row for verification
+      try {
+        const saved = await this.userStatRepository.findOne({
+          where: { userId: dto.userId },
+        });
+        console.log(
+          `Saved userStats for user=${dto.userId}:`,
+          JSON.stringify(saved),
+        );
+      } catch (e) {
+        console.warn('Could not read back saved userStats for logging', e);
+      }
 
       return {
         success: true,
