@@ -294,16 +294,31 @@ export class UsersService {
     await this.usersRepository.save(user);
 
     // Ensure derived stats are recomputed authoritatively after level up and heal the player.
-    try {
-      await this.userStatsService.recomputeAndPersistForUser(user.id, {
-        fillCurrentHp: true,
-      });
-    } catch (e) {
-      this.logger.warn(
-        'Failed to recompute stats after level up: ' +
-          ((e as Error)?.message || e),
-      );
-    }
+    // Note: Since equip doesn't change on level up, we don't need to recompute stats here.
+    // applyLevelUpStats has already updated the userStats correctly.
+    // Recomputation is only needed when equip changes.
+    // try {
+    //   // Schedule recompute asynchronously to avoid transactional/visibility
+    //   // issues where item relations may not be visible in the immediate call
+    //   // context after we save the user. Running recompute via setImmediate
+    //   // allows the DB commit / event loop to settle so repository queries
+    //   // will see the equipped items and set rows reliably.
+    //   setImmediate(() => {
+    //     void this.userStatsService
+    //       .recomputeAndPersistForUser(user.id, { fillCurrentHp: true })
+    //       .catch((err) =>
+    //         this.logger.warn(
+    //           'Failed to recompute stats after level up (async): ' +
+    //             ((err as Error)?.message || err),
+    //         ),
+    //       );
+    //   });
+    // } catch (e) {
+    //   this.logger.warn(
+    //     'Failed to schedule recompute after level up: ' +
+    //       ((e as Error)?.message || e),
+    //   );
+    // }
 
     // Evaluate possible awakenings/promotions after level up
     try {
