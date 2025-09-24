@@ -36,6 +36,8 @@ import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
 import { MarketModule } from './market/market.module';
 import { ExploreModule } from './explore/explore.module';
+import { UserAttributesModule } from './user-attributes/user-attributes.module';
+import { SkillModule } from './player-skills/skill.module';
 
 // ServeStatic DynamicModule instance for serving backend/assets at /assets
 // Narrow ts-ignore to the known interop call only
@@ -80,12 +82,12 @@ const ServeStaticDynamic: DynamicModule =
               port: parseInt(process.env.DB_PORT || '5432'),
               username: process.env.DB_USERNAME || 'postgres',
               password: process.env.DB_PASSWORD || 'password',
-              database: process.env.DB_DATABASE || 'thoi_dai_tho_san',
+              database: process.env.DB_DATABASE || 'thoi_dai_tho_san_v2',
             }),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         // Only enable synchronize when explicitly requested via env var to avoid
         // accidental schema changes at runtime. Default: false.
-        synchronize: process.env.TYPEORM_SYNCHRONIZE === 'true',
+        synchronize: false,
         // Disable verbose SQL logging by default; set TYPEORM_LOGGING=true to enable
         logging: process.env.TYPEORM_LOGGING === 'true',
       });
@@ -122,6 +124,8 @@ const ServeStaticDynamic: DynamicModule =
     AdminModule,
     MarketModule,
     ExploreModule,
+    UserAttributesModule,
+    SkillModule,
   ],
   controllers: [AppController],
   providers: [AppService],

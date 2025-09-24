@@ -7,7 +7,6 @@ import {
   Request,
   NotFoundException,
   ForbiddenException,
-  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -32,11 +31,10 @@ export class AdminController {
     if (!isAdminCaller) throw new ForbiddenException('Admin only');
 
     const uid = Number(id);
-    const res = await this.userStatsService.recomputeAndPersistForUser(uid, {
-      fillCurrentHp: true,
-    });
-    if (!res) throw new NotFoundException('User stat not found');
-    return { ok: true, userStat: res };
+    // Stats are now calculated on-demand from core attributes, no need to recompute
+    const userStat = await this.userStatsService.findByUserId(uid);
+    if (!userStat) throw new NotFoundException('User stat not found');
+    return { ok: true, userStat };
   }
 
   @UseGuards(JwtAuthGuard)
@@ -59,7 +57,6 @@ export class AdminController {
 
     if (runNow === true || runNow === 'true') {
       // Create application-scoped operation and run paginated backfill
-      const appContext = req.appContext as any;
       // If appContext is not provided, fall back to creating a new Queue-less run
       try {
         // Use the same service used by the worker
@@ -72,11 +69,14 @@ export class AdminController {
           const batch = ids.slice(i, i + batchSize);
           for (const uid of batch) {
             try {
-              await userStatsService.recomputeAndPersistForUser(uid);
-              processed++;
+              // Stats are now calculated on-demand, just ensure user stats exist
+              const userStat = await userStatsService.findByUserId(uid);
+              if (userStat) {
+                processed++;
+              }
             } catch (err: unknown) {
               console.error(
-                'Backfill user failed',
+                'Check user stat failed',
                 uid,
                 (err as any)?.message || err,
               );

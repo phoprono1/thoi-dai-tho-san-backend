@@ -13,6 +13,7 @@ import {
 import { MonsterService } from './monster.service';
 import { Monster, MonsterType } from './monster.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('monsters')
 export class MonsterController {
@@ -42,6 +43,46 @@ export class MonsterController {
     @Query('maxLevel', ParseIntPipe) maxLevel: number,
   ): Promise<Monster[]> {
     return this.monsterService.getMonstersByLevelRange(minLevel, maxLevel);
+  }
+
+  // Admin endpoints
+  @Post('admin')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminCreateMonster(
+    @Body() monsterData: Partial<Monster>,
+  ): Promise<Monster> {
+    return this.monsterService.createMonster(monsterData);
+  }
+
+  @Get('admin')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminGetAllMonsters(): Promise<Monster[]> {
+    return this.monsterService.getAllMonsters();
+  }
+
+  @Get('admin/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminGetMonsterById(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<Monster | null> {
+    return this.monsterService.getMonsterById(id);
+  }
+
+  @Put('admin/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminUpdateMonster(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateData: Partial<Monster>,
+  ): Promise<Monster> {
+    return this.monsterService.updateMonster(id, updateData);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminDeleteMonster(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<void> {
+    return this.monsterService.deleteMonster(id);
   }
 
   @Get(':id')

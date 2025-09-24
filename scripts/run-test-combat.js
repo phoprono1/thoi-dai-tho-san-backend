@@ -9,7 +9,7 @@
 
     const appContext = await NestFactory.createApplicationContext(AppModule);
     const combatService = appContext.get(CombatResultsService);
-    const res = await combatService.startCombat([12], 12);
+    const res = await combatService.startCombat([4], 3);
     console.log(JSON.stringify(res, null, 2));
     await appContext.close();
     process.exit(0);

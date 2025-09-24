@@ -63,21 +63,12 @@ export class CharacterClass {
 
   @Column({ type: 'jsonb' })
   statBonuses: {
-    // Basic stats
+    // Core attribute bonuses
     strength?: number;
     intelligence?: number;
     dexterity?: number;
     vitality?: number;
     luck?: number;
-    // Advanced stats
-    critRate?: number; // Bạo kích (%)
-    critDamage?: number; // Sát thương bạo kích (%)
-    comboRate?: number; // Liên kích (%)
-    counterRate?: number; // Phản kích (%)
-    lifesteal?: number; // Hút máu (%)
-    armorPen?: number; // Xuyên giáp (%)
-    dodgeRate?: number; // Né tránh (%)
-    accuracy?: number; // Chính xác (%)
   };
 
   @Column({ type: 'jsonb' })

@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @types      // Determine combat action
+      const action = this.determineCombatAction(derivedStats);ipt-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import {
@@ -24,6 +25,7 @@ import {
   BossCombatResultDto,
 } from './world-boss.dto';
 import { Mailbox, MailType } from '../mailbox/mailbox.entity';
+import { deriveCombatStats } from '../combat-engine/stat-converter';
 
 @Injectable()
 export class WorldBossService {
@@ -236,7 +238,20 @@ export class WorldBossService {
       }
 
       // Calculate damage based on user's HP percentage
-      const hpPercentage = (userStats.currentHp / userStats.maxHp) * 100;
+      const coreAttrs = {
+        strength: userStats.strength || 0,
+        intelligence: userStats.intelligence || 0,
+        dexterity: userStats.dexterity || 0,
+        vitality: userStats.vitality || 0,
+        luck: userStats.luck || 0,
+      };
+      const derivedStats = deriveCombatStats({
+        baseAttack: 10,
+        baseMaxHp: 100,
+        baseDefense: 5,
+        ...coreAttrs,
+      });
+      const hpPercentage = (userStats.currentHp / derivedStats.maxHp) * 100;
       const actualDamage = Math.floor(dto.damage * (hpPercentage / 100));
 
       // Ensure damage doesn't exceed boss HP
@@ -244,7 +259,7 @@ export class WorldBossService {
       const newBossHp = boss.currentHp - finalDamage;
 
       // Determine combat action
-      const action = this.determineCombatAction(userStats, boss);
+      const action = this.determineCombatAction(derivedStats);
 
       // Create combat log
       const combatLog = queryRunner.manager.create(BossCombatLog, {
@@ -255,12 +270,12 @@ export class WorldBossService {
         bossHpBefore: boss.currentHp,
         bossHpAfter: newBossHp,
         playerStats: {
-          attack: userStats.attack,
-          defense: userStats.defense,
-          critRate: userStats.critRate,
-          critDamage: userStats.critDamage,
+          attack: derivedStats.attack,
+          defense: derivedStats.defense,
+          critRate: derivedStats.critRate,
+          critDamage: derivedStats.critDamage,
           currentHp: userStats.currentHp,
-          maxHp: userStats.maxHp,
+          maxHp: derivedStats.maxHp,
         },
         bossStats: {
           attack: boss.stats.attack,
@@ -333,11 +348,8 @@ export class WorldBossService {
     }
   }
 
-  private determineCombatAction(
-    userStats: UserStat,
-    boss: WorldBoss,
-  ): CombatAction {
-    const critChance = userStats.critRate / 100;
+  private determineCombatAction(derivedStats: any): CombatAction {
+    const critChance = derivedStats.critRate / 100;
     const missChance = 0.05; // 5% miss chance
 
     const random = Math.random();

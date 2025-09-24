@@ -47,23 +47,21 @@ export class AuthService {
       });
       console.log('User created successfully:', user.id);
 
-      // Tự động tạo UserStat với base stats cho tân thủ
+      // Tự động tạo UserStat với base stats mặc định
       await this.userStatsService.create({
         userId: user.id,
-        maxHp: 100,
-        currentHp: 100,
-        attack: 10,
-        defense: 5,
-        critRate: 0,
-        critDamage: 150,
-        comboRate: 0,
-        counterRate: 0,
-        lifesteal: 0,
-        armorPen: 0,
-        dodgeRate: 0,
-        accuracy: 0,
+        strength: 10,
+        intelligence: 10,
+        dexterity: 10,
+        vitality: 10,
+        luck: 10,
+        currentHp: 100, // Temporary value, will be updated to max HP
       });
       console.log('UserStat created successfully');
+
+      // Update HP to max HP based on current stats
+      await this.userStatsService.updateHpToMax(user.id);
+      console.log('User HP updated to max');
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...result } = user;

@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { QuestService } from './quest.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('quests')
 export class QuestController {
@@ -136,5 +137,39 @@ export class QuestController {
   @Get('user/progress-summary')
   async getQuestProgressSummary(@Request() req) {
     return this.questService.getQuestProgressSummary(req.user.id);
+  }
+
+  // Admin endpoints
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Post('admin')
+  async adminCreateQuest(@Body() questData: any) {
+    return this.questService.createQuest(questData);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Get('admin')
+  async adminGetAllQuests() {
+    return this.questService.getAllQuests();
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Put('admin/:id')
+  async adminUpdateQuest(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() questData: any,
+  ) {
+    return await this.questService.updateQuest(id, questData);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Delete('admin/:id')
+  async adminDeleteQuest(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('force') forceQuery?: string,
+  ) {
+    // Allow force deletion via query param `?force=true`
+    const force = forceQuery === 'true';
+    await this.questService.deleteQuest(id, force);
+    return { message: 'Quest deleted successfully' };
   }
 }

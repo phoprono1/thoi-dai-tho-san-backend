@@ -19,11 +19,17 @@ async function backfillUserStats() {
 
   for (const user of users) {
     try {
-      console.log(`Recomputing stats for user ${user.id} (${user.username})`);
-      await userStatsService.recomputeAndPersistForUser(user.id);
+      console.log(`Ensuring stats exist for user ${user.id} (${user.username})`);
+      const existingStats = await userStatsService.findByUserId(user.id);
+      if (!existingStats) {
+        await userStatsService.createForUser(user.id);
+        console.log(`Created default stats for user ${user.id}`);
+      } else {
+        console.log(`Stats already exist for user ${user.id}`);
+      }
       successCount++;
     } catch (error) {
-      console.error(`Failed to recompute stats for user ${user.id}:`, error);
+      console.error(`Failed to ensure stats for user ${user.id}:`, error);
       errorCount++;
     }
   }

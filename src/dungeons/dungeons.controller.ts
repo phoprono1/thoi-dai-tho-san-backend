@@ -24,6 +24,7 @@ import { DungeonsService } from './dungeons.service';
 // requests receive full list; authenticated requests receive filtered list)
 import { Dungeon } from './dungeon.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @ApiTags('dungeons')
 @Controller('dungeons')
@@ -195,6 +196,56 @@ export class DungeonsController {
     description: 'Không tìm thấy dungeon',
   })
   remove(@Param('id') id: string): Promise<void> {
+    return this.dungeonsService.remove(+id);
+  }
+
+  // Admin endpoints
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Post('admin')
+  @ApiOperation({ summary: 'Admin tạo dungeon mới' })
+  @ApiResponse({
+    status: 201,
+    description: 'Dungeon đã được tạo bởi admin',
+  })
+  adminCreateDungeon(@Body() dungeon: Partial<Dungeon>): Promise<Dungeon> {
+    return this.dungeonsService.create(dungeon);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Get('admin')
+  @ApiOperation({ summary: 'Admin lấy danh sách tất cả dungeons' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách tất cả dungeons cho admin',
+  })
+  adminGetAllDungeons(): Promise<Dungeon[]> {
+    return this.dungeonsService.findAll();
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Put('admin/:id')
+  @ApiOperation({ summary: 'Admin cập nhật dungeon' })
+  @ApiParam({ name: 'id', description: 'ID của dungeon' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dungeon đã được cập nhật bởi admin',
+  })
+  adminUpdateDungeon(
+    @Param('id') id: string,
+    @Body() dungeon: Partial<Dungeon>,
+  ): Promise<Dungeon | null> {
+    return this.dungeonsService.update(+id, dungeon);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Delete('admin/:id')
+  @ApiOperation({ summary: 'Admin xóa dungeon' })
+  @ApiParam({ name: 'id', description: 'ID của dungeon' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dungeon đã được xóa bởi admin',
+  })
+  adminDeleteDungeon(@Param('id') id: string): Promise<void> {
     return this.dungeonsService.remove(+id);
   }
 }

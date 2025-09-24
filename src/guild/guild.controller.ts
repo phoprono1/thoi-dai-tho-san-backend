@@ -55,7 +55,7 @@ export class GuildController {
       // Log diagnostic info to help debug production 500s
       try {
         const uid = req?.user?.id;
-        // eslint-disable-next-line no-console
+
         console.error('[GuildController] createGuild failed', {
           userId: uid,
           dto,

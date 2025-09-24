@@ -31,16 +31,36 @@ export function deriveCombatStats(core: {
   DEX?: number;
   LUK?: number;
   INT?: number;
+  // Lowercase versions
+  strength?: number;
+  vitality?: number;
+  dexterity?: number;
+  luck?: number;
+  intelligence?: number;
+  // Player-allocated attribute points
+  strengthPoints?: number;
+  intelligencePoints?: number;
+  dexterityPoints?: number;
+  vitalityPoints?: number;
+  luckPoints?: number;
 }): CombatStats {
   const baseAttack = core.baseAttack ?? 10;
   const baseMaxHp = core.baseMaxHp ?? 100;
   const baseDefense = core.baseDefense ?? 5;
 
-  const s = effective(core.STR ?? 0);
-  const v = effective(core.VIT ?? 0);
-  const d = effective(core.DEX ?? 0);
-  const l = effective(core.LUK ?? 0);
-  const i = effective(core.INT ?? 0);
+  const s = effective(
+    (core.STR ?? core.strength ?? 0) + (core.strengthPoints ?? 0),
+  );
+  const v = effective(
+    (core.VIT ?? core.vitality ?? 0) + (core.vitalityPoints ?? 0),
+  );
+  const d = effective(
+    (core.DEX ?? core.dexterity ?? 0) + (core.dexterityPoints ?? 0),
+  );
+  const l = effective((core.LUK ?? core.luck ?? 0) + (core.luckPoints ?? 0));
+  const i = effective(
+    (core.INT ?? core.intelligence ?? 0) + (core.intelligencePoints ?? 0),
+  );
 
   const attack = Math.floor(
     baseAttack +
@@ -66,6 +86,11 @@ export function deriveCombatStats(core: {
   const comboRate = CONFIG.combo_from_DEX * d || 0;
   const counterRate = 0;
 
+  const maxMana = Math.max(
+    50,
+    Math.floor(((core.INT ?? 0) + (core.intelligencePoints ?? 0)) * 10),
+  );
+
   return {
     maxHp,
     attack,
@@ -78,5 +103,7 @@ export function deriveCombatStats(core: {
     accuracy,
     comboRate,
     counterRate,
+    maxMana,
+    currentMana: maxMana, // Start with full mana
   };
 }

@@ -18,7 +18,9 @@ import { UserStatsService } from '../user-stats/user-stats.service';
 import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { Monster } from '../monsters/monster.entity';
 import { ItemsService } from '../items/items.service';
+import { SkillService } from '../player-skills/skill.service';
 import { runCombat } from '../combat-engine/engine';
+import { deriveCombatStats } from '../combat-engine/stat-converter';
 
 @Injectable()
 export class CombatResultsService {
@@ -40,7 +42,75 @@ export class CombatResultsService {
     private userStaminaService: UserStaminaService,
     private userStatsService: UserStatsService,
     private itemsService: ItemsService,
+    private skillService: SkillService,
   ) {}
+
+  /**
+   * Calculate total core attributes for a user including base stats, level bonuses, class bonuses, and equip bonuses
+   */
+  private async calculateTotalCoreAttributes(userId: number): Promise<{
+    STR: number;
+    INT: number;
+    DEX: number;
+    VIT: number;
+    LUK: number;
+  }> {
+    // Get user with relations
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+      relations: ['stats', 'characterClass'],
+    });
+
+    if (!user || !user.stats) {
+      throw new Error(`User ${userId} not found or has no stats`);
+    }
+
+    // Base core attributes
+    let totalSTR = user.stats.strength;
+    let totalINT = user.stats.intelligence;
+    let totalDEX = user.stats.dexterity;
+    let totalVIT = user.stats.vitality;
+    let totalLUK = user.stats.luck;
+
+    // Level bonuses (cumulative from level 1 to current level)
+    const levelBonuses = await this.levelsService.getTotalLevelStats(user.level);
+    if (levelBonuses) {
+      totalSTR += levelBonuses.strength || 0;
+      totalINT += levelBonuses.intelligence || 0;
+      totalDEX += levelBonuses.dexterity || 0;
+      totalVIT += levelBonuses.vitality || 0;
+      totalLUK += levelBonuses.luck || 0;
+    }
+
+    // Character class bonuses
+    if (user.characterClass?.statBonuses) {
+      totalSTR += user.characterClass.statBonuses.strength || 0;
+      totalINT += user.characterClass.statBonuses.intelligence || 0;
+      totalDEX += user.characterClass.statBonuses.dexterity || 0;
+      totalVIT += user.characterClass.statBonuses.vitality || 0;
+      totalLUK += user.characterClass.statBonuses.luck || 0;
+    }
+
+    // Equipment bonuses
+    const equippedItems = await this.userItemsService.findByUserId(userId);
+    for (const userItem of equippedItems) {
+      if (userItem.isEquipped && userItem.item?.stats) {
+        totalSTR += userItem.item.stats.strength || 0;
+        totalINT += userItem.item.stats.intelligence || 0;
+        totalDEX += userItem.item.stats.dexterity || 0;
+        totalVIT += userItem.item.stats.vitality || 0;
+        totalLUK += userItem.item.stats.luck || 0;
+      }
+    }
+
+    return {
+      STR: totalSTR,
+      INT: totalINT,
+      DEX: totalDEX,
+      VIT: totalVIT,
+      LUK: totalLUK,
+    };
+  }
 
   async startCombat(userIds: number[], dungeonId: number) {
     const startTime = Date.now();
@@ -120,8 +190,7 @@ export class CombatResultsService {
         users.map((u) => ({
           id: u.id,
           username: u.username,
-          maxHp: u.stats?.maxHp,
-          currentHp: u.stats?.currentHp,
+          maxHp: u.stats?.currentHp, // Only currentHp exists now
         })),
       );
     } catch {
@@ -134,15 +203,27 @@ export class CombatResultsService {
     // Tính thời gian
     const duration = Date.now() - startTime;
 
-    // Khởi tạo team stats
+    // Khởi tạo team stats - calculate maxHp from derived stats
+    const teamMaxHpPromises = users.map(async (user) => {
+      const coreAttrs = await this.calculateTotalCoreAttributes(user.id);
+      const derivedStats = deriveCombatStats({
+        baseAttack: 10,
+        baseMaxHp: 100,
+        baseDefense: 5,
+        ...coreAttrs,
+      });
+      return derivedStats.maxHp;
+    });
+    const teamMaxHps = await Promise.all(teamMaxHpPromises);
+
     const teamStats = {
-      totalHp: users.reduce((sum, user) => sum + user.stats.maxHp, 0),
+      totalHp: teamMaxHps.reduce((sum, maxHp) => sum + maxHp, 0),
       currentHp: users.reduce((sum, user) => sum + user.stats.currentHp, 0),
-      members: users.map((user) => ({
+      members: users.map((user, idx) => ({
         userId: user.id,
         username: user.username,
         hp: user.stats.currentHp,
-        maxHp: user.stats.maxHp,
+        maxHp: teamMaxHps[idx],
       })),
     };
 
@@ -320,22 +401,22 @@ export class CombatResultsService {
       }
     }
 
-    // If we rolled items per-user, build a per-user rewards array so clients can
-    // see exactly what each player received. For single-player runs, expose
-    // that player's rewards in `finalResult.rewards` (so you won't see the
-    // aggregated pool which can be misleading).
-    if (combatResult.result === 'victory') {
-      try {
-        // perUserBase and perUserItems are only defined in the victory path
-        // earlier when we applied rewards. If they're present in scope use
-        // them; otherwise fall back to aggregated rewards.
-        // Note: perUserBase/perUserItems were computed above in the victory block.
-        // We reconstruct perUserCombined if available.
-        if (typeof (global as any).dummy === 'undefined') {
-          // no-op to keep TypeScript happy about variable usage
+    // Update user HP after combat
+    for (let i = 0; i < users.length; i++) {
+      const user = users[i];
+      const finalHp =
+        combatResult.teamStats.members[i]?.hp ?? user.stats.currentHp;
+      if (finalHp !== user.stats.currentHp) {
+        try {
+          await this.userStatsService.updateByUserId(user.id, {
+            currentHp: finalHp,
+          });
+        } catch (err) {
+          console.warn(
+            `Failed to update HP for user ${user.id} after combat:`,
+            err instanceof Error ? err.message : err,
+          );
         }
-      } catch (err) {
-        console.error('Error enriching reward item names', err);
       }
     }
 
@@ -471,25 +552,26 @@ export class CombatResultsService {
     }
 
     // Prepare player and enemy inputs for engine
-    const playerInputs = users.map((u) => ({
-      id: u.id,
-      name: u.username,
-      isPlayer: true,
-      stats: {
-        maxHp: u.stats.maxHp,
-        attack: u.stats.attack,
-        defense: u.stats.defense,
-        critRate: u.stats.critRate ?? 0,
-        critDamage: u.stats.critDamage ?? 150,
-        lifesteal: u.stats.lifesteal ?? 0,
-        armorPen: u.stats.armorPen ?? 0,
-        dodgeRate: u.stats.dodgeRate ?? 0,
-        accuracy: u.stats.accuracy ?? 0,
-        comboRate: u.stats.comboRate ?? 0,
-        counterRate: u.stats.counterRate ?? 0,
-      },
-      currentHp: u.stats.currentHp,
-    }));
+    const playerInputsPromises = users.map(async (u) => {
+      const coreAttrs = await this.calculateTotalCoreAttributes(u.id);
+      const derivedStats = deriveCombatStats({
+        baseAttack: 10,
+        baseMaxHp: 100,
+        baseDefense: 5,
+        ...coreAttrs,
+      });
+
+      return {
+        id: u.id,
+        name: u.username,
+        isPlayer: true,
+        stats: derivedStats,
+        currentHp: u.stats.currentHp,
+        skillCooldowns: {}, // Initialize empty cooldowns
+      };
+    });
+
+    const playerInputs = await Promise.all(playerInputsPromises);
 
     const enemyInputs = internalEnemies.map((en) => ({
       id: en.instanceId ?? en.id,
@@ -507,6 +589,8 @@ export class CombatResultsService {
         accuracy: 0,
         comboRate: 0,
         counterRate: 0,
+        maxMana: en.maxHp, // Enemies don't use mana, set to maxHp for consistency
+        currentMana: en.maxHp,
       },
       currentHp: en.hp,
     }));
@@ -523,7 +607,7 @@ export class CombatResultsService {
     }
 
     const finalTeamStats = {
-      totalHp: users.reduce((sum, user) => sum + user.stats.maxHp, 0),
+      totalHp: playerInputs.reduce((sum, p) => sum + p.stats.maxHp, 0),
       currentHp: run.finalPlayers.reduce(
         (sum: number, p: any) => sum + (p.currentHp ?? p.stats.maxHp),
         0,
@@ -532,7 +616,7 @@ export class CombatResultsService {
         userId: user.id,
         username: user.username,
         hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
-        maxHp: user.stats.maxHp,
+        maxHp: playerInputs[idx].stats.maxHp,
       })),
     };
 
@@ -726,6 +810,25 @@ export class CombatResultsService {
       }
     }
 
+    // Update user HP after combat
+    for (let i = 0; i < users.length; i++) {
+      const user = users[i];
+      const finalHp =
+        combatResult.teamStats.members[i]?.hp ?? user.stats.currentHp;
+      if (finalHp !== user.stats.currentHp) {
+        try {
+          await this.userStatsService.updateByUserId(user.id, {
+            currentHp: finalHp,
+          });
+        } catch (err) {
+          console.warn(
+            `Failed to update HP for user ${user.id} after combat:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+    }
+
     const finalResult = {
       id: (savedCombat as any)?.id,
       combatResultId: (savedCombat as any)?.id,
@@ -749,26 +852,46 @@ export class CombatResultsService {
   }
 
   private async processTeamCombat(users: User[], dungeon: Dungeon) {
-    // Prepare player inputs
-    const playerInputs = users.map((u) => ({
-      id: u.id,
-      name: u.username,
-      isPlayer: true,
-      stats: {
-        maxHp: u.stats.maxHp,
-        attack: u.stats.attack,
-        defense: u.stats.defense,
-        critRate: u.stats.critRate ?? 0,
-        critDamage: u.stats.critDamage ?? 150,
-        lifesteal: u.stats.lifesteal ?? 0,
-        armorPen: u.stats.armorPen ?? 0,
-        dodgeRate: u.stats.dodgeRate ?? 0,
-        accuracy: u.stats.accuracy ?? 0,
-        comboRate: u.stats.comboRate ?? 0,
-        counterRate: u.stats.counterRate ?? 0,
-      },
-      currentHp: u.stats.currentHp,
-    }));
+    // Prepare player inputs using derived stats from core attributes
+    const playerInputsPromises = users.map(async (u) => {
+      const coreAttrs = await this.calculateTotalCoreAttributes(u.id);
+      const derivedStats = deriveCombatStats({
+        baseAttack: 10,
+        baseMaxHp: 100,
+        baseDefense: 5,
+        ...coreAttrs,
+      });
+
+      // Get user's active skills
+      const userSkills = await this.skillService.getPlayerSkills(u.id);
+      const activeSkills = userSkills
+        .filter((ps) => ps.skillDefinition.skillType === 'active')
+        .map((ps) => ({
+          id: ps.skillDefinition.skillId,
+          name: ps.skillDefinition.name,
+          skillType: ps.skillDefinition.skillType,
+          manaCost: ps.skillDefinition.manaCost,
+          cooldown: ps.skillDefinition.cooldown,
+          targetType: ps.skillDefinition.targetType,
+          damageType: ps.skillDefinition.damageType,
+          damageFormula: ps.skillDefinition.damageFormula,
+          healingFormula: ps.skillDefinition.healingFormula,
+          effects: ps.skillDefinition.effects,
+          level: ps.level,
+        }));
+
+      return {
+        id: u.id,
+        name: u.username,
+        isPlayer: true,
+        stats: derivedStats,
+        currentHp: u.stats.currentHp,
+        skills: activeSkills,
+        skillCooldowns: {}, // Initialize empty cooldowns
+      };
+    });
+
+    const playerInputs = await Promise.all(playerInputsPromises);
 
     // Build enemies and keep internal copy for rewards. Use a unique
     // instanceId per spawned enemy so engine IDs are unique even when
@@ -842,6 +965,8 @@ export class CombatResultsService {
         accuracy: 0,
         comboRate: 0,
         counterRate: 0,
+        maxMana: en.maxHp, // Enemies don't use mana, set to maxHp for consistency
+        currentMana: en.maxHp,
       },
       currentHp: en.hp,
     }));
@@ -864,9 +989,9 @@ export class CombatResultsService {
         run.finalEnemies[i]?.currentHp ?? internalEnemies[i].hp;
     }
 
-    // Build final teamStats
+    // Build final teamStats using derived maxHp
     const finalTeamStats = {
-      totalHp: users.reduce((sum, user) => sum + user.stats.maxHp, 0),
+      totalHp: playerInputs.reduce((sum, p) => sum + p.stats.maxHp, 0),
       currentHp: run.finalPlayers.reduce(
         (sum: number, p: any) => sum + (p.currentHp ?? p.stats.maxHp),
         0,
@@ -875,7 +1000,7 @@ export class CombatResultsService {
         userId: user.id,
         username: user.username,
         hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
-        maxHp: user.stats.maxHp,
+        maxHp: playerInputs[idx].stats.maxHp,
       })),
     };
 
@@ -1233,18 +1358,29 @@ export class CombatResultsService {
       if (user.experience >= nextLevel.experienceRequired) {
         // Level up!
         user.level = nextLevel.level;
-        user.experience -= nextLevel.experienceRequired;
+        // NOTE: Experience is cumulative, don't subtract it
+        // user.experience -= nextLevel.experienceRequired;
         leveledUp = true;
 
-        // Cộng stats từ level mới vào user stats
-        const levelStats = await this.levelsService.getTotalLevelStats(
-          nextLevel.level,
-        );
-        if (levelStats) {
-          await this.userStatsService.recalculateTotalStats(
+        // NOTE: Level bonuses are now calculated on-demand in getTotalStatsWithAllBonuses
+        // Do NOT permanently modify base stats in the database
+
+        // Award free attribute points for this level
+        const levelData = await this.levelsService.findByLevel(nextLevel.level);
+        if (levelData && levelData.attributePointsReward > 0) {
+          await this.userStatsService.addFreeAttributePoints(
             user.id,
-            levelStats,
-            { maxHp: 100, attack: 10, defense: 5 }, // Base stats
+            levelData.attributePointsReward,
+          );
+        }
+
+        // Update HP to new max HP after level up
+        try {
+          await this.userStatsService.updateHpToMax(user.id);
+        } catch (err) {
+          console.warn(
+            'Failed to update HP after level up:',
+            err instanceof Error ? err.message : err,
           );
         }
       } else {

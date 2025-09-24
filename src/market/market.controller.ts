@@ -18,6 +18,7 @@ import { CreateListingDto } from './dto/create-listing.dto';
 import { PlaceOfferDto } from './dto/place-offer.dto';
 import { CurrentUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 import { User } from '../users/user.entity';
 
 @Controller('market')
@@ -36,6 +37,7 @@ export class MarketController {
 
   // Admin: list shop items
   @Get('shop')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   async listShopItems() {
     // Admin-facing: return all shop items (admin UI)
     return this.marketService.listShopItems();
@@ -49,6 +51,7 @@ export class MarketController {
 
   // Admin: add item to shop
   @Post('shop')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async addShopItem(
     @Body('itemId', ParseIntPipe) itemId: number,
@@ -60,12 +63,14 @@ export class MarketController {
 
   // Admin: deactivate/remove shop item
   @Delete('shop/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   async removeShopItem(@Param('id', ParseIntPipe) id: number) {
     return this.marketService.removeShopItem(id);
   }
 
   // Admin: update shop item (price, quantity, active)
   @Patch('shop/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async updateShopItem(
     @Param('id', ParseIntPipe) id: number,

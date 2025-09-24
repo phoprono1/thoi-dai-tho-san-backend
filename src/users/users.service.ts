@@ -281,10 +281,7 @@ export class UsersService {
       // Lưu user trước để update level
       await this.usersRepository.save(user);
 
-      // Tính lại toàn bộ stats sau khi level up
-      await this.userStatsService.recomputeAndPersistForUser(id, {
-        fillCurrentHp: true,
-      });
+      // Stats are now computed on-demand from core attributes, no need to recompute
     }
 
     if (user.level === originalLevel) {

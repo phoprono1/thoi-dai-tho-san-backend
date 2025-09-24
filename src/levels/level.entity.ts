@@ -26,21 +26,25 @@ export class Level {
     items?: { itemId: number; quantity: number }[];
   }; // Phần thưởng khi lên level
 
-  // Base stats for this level
-  @Column({ default: 100 })
-  maxHp: number;
+  // Core attribute bonuses for this level
+  @Column({ default: 0 })
+  strength: number;
 
-  @Column({ default: 50 })
-  maxMp: number;
+  @Column({ default: 0 })
+  intelligence: number;
 
-  @Column({ default: 10 })
-  attack: number;
+  @Column({ default: 0 })
+  dexterity: number;
 
+  @Column({ default: 0 })
+  vitality: number;
+
+  @Column({ default: 0 })
+  luck: number;
+
+  // Free attribute points rewarded at this level
   @Column({ default: 5 })
-  defense: number;
-
-  @Column({ default: 8 })
-  speed: number;
+  attributePointsReward: number;
 
   @CreateDateColumn()
   createdAt: Date;

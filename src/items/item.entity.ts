@@ -47,22 +47,7 @@ export class Item {
 
   @Column('json', { nullable: true })
   stats: {
-    // Base stats
-    attack?: number;
-    defense?: number;
-    hp?: number;
-    mp?: number;
-    experience?: number;
-    // Advanced stats
-    critRate?: number; // Bạo kích (%)
-    critDamage?: number; // Sát thương bạo kích (%)
-    comboRate?: number; // Liên kích (%)
-    counterRate?: number; // Phản kích (%)
-    lifesteal?: number; // Hút máu (%)
-    armorPen?: number; // Xuyên giáp (%)
-    dodgeRate?: number; // Né tránh (%)
-    accuracy?: number; // Chính xác (%)
-    // Stat boosts for consumables
+    // Core attribute bonuses
     strength?: number;
     intelligence?: number;
     dexterity?: number;

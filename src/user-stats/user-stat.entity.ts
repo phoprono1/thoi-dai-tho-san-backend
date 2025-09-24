@@ -21,20 +21,11 @@ export class UserStat {
   @Column({ default: 0 })
   userId: number;
 
-  // Base stats
-  @Column({ default: 100 })
-  maxHp: number;
-
+  // Current HP (persisted for gameplay)
   @Column({ default: 100 })
   currentHp: number;
 
-  @Column({ default: 10 })
-  attack: number;
-
-  @Column({ default: 5 })
-  defense: number;
-
-  // Core attributes
+  // Core attributes - only these are persisted
   @Column({ default: 10 })
   strength: number; // Sức mạnh
 
@@ -50,30 +41,25 @@ export class UserStat {
   @Column({ default: 10 })
   luck: number; // May mắn
 
-  // Advanced stats
+  // Free attribute points system
   @Column({ default: 0 })
-  critRate: number; // Bạo kích (%)
+  unspentAttributePoints: number; // Điểm thuộc tính chưa phân phối
 
-  @Column({ default: 150 })
-  critDamage: number; // Sát thương bạo kích (%)
-
+  // Points allocated by player into each attribute
   @Column({ default: 0 })
-  comboRate: number; // Liên kích (%)
+  strengthPoints: number; // Điểm STR đã invest
 
   @Column({ default: 0 })
-  counterRate: number; // Phản kích (%)
+  intelligencePoints: number; // Điểm INT đã invest
 
   @Column({ default: 0 })
-  lifesteal: number; // Hút máu (%)
+  dexterityPoints: number; // Điểm DEX đã invest
 
   @Column({ default: 0 })
-  armorPen: number; // Xuyên giáp (%)
+  vitalityPoints: number; // Điểm VIT đã invest
 
   @Column({ default: 0 })
-  dodgeRate: number; // Né tránh (%)
-
-  @Column({ default: 0 })
-  accuracy: number; // Chính xác (%)
+  luckPoints: number; // Điểm LUK đã invest
 
   @CreateDateColumn()
   createdAt: Date;

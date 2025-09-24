@@ -69,7 +69,7 @@ export class MailboxService {
       this.mailboxGateway.emitUnreadCount(dto.userId, unread);
     } catch (e) {
       // Non-fatal: log and continue
-      // eslint-disable-next-line no-console
+
       console.error('Failed to emit mailbox events after sendMail', e);
     }
 

@@ -15,6 +15,7 @@ import { CharacterClassAdvancement } from './character-class-advancement.entity'
 import { CharacterClassService } from './character-class.service';
 import { CreateMappingDto, UpdateMappingDto } from './character-class.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('admin/character-classes/:fromClassId/mappings')
 export class MappingsController {
@@ -24,13 +25,13 @@ export class MappingsController {
     private readonly mappingRepo: Repository<CharacterClassAdvancement>,
   ) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Get()
   async list(@Param('fromClassId', ParseIntPipe) fromClassId: number) {
     return this.mappingRepo.find({ where: { fromClassId } });
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Post()
   async create(
     @Param('fromClassId', ParseIntPipe) fromClassId: number,
@@ -40,7 +41,7 @@ export class MappingsController {
     return this.mappingRepo.save(mapping);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Put(':id')
   async update(
     @Param('fromClassId', ParseIntPipe) fromClassId: number,
@@ -55,7 +56,7 @@ export class MappingsController {
     return this.mappingRepo.save(mapping);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Delete(':id')
   async remove(
     @Param('fromClassId', ParseIntPipe) fromClassId: number,
@@ -70,7 +71,7 @@ export class MappingsController {
   }
 
   // Bulk normalize mappings (expects body: { mappings: [{ id, weight, ... }] })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @Put('normalize')
   async normalize(
     @Param('fromClassId', ParseIntPipe) fromClassId: number,

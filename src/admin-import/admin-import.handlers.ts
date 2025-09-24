@@ -314,11 +314,11 @@ export async function processLevels(
         : 0;
       l.name = r.name ? String(r.name) : null;
       l.rewards = parseJsonField(r.rewards, {});
-      l.maxHp = r.maxHp ? Number(r.maxHp) : 100;
-      l.maxMp = r.maxMp ? Number(r.maxMp) : 50;
-      l.attack = r.attack ? Number(r.attack) : 10;
-      l.defense = r.defense ? Number(r.defense) : 5;
-      l.speed = r.speed ? Number(r.speed) : 8;
+      l.strength = r.strength ? Number(r.strength) : 0;
+      l.intelligence = r.intelligence ? Number(r.intelligence) : 0;
+      l.dexterity = r.dexterity ? Number(r.dexterity) : 0;
+      l.vitality = r.vitality ? Number(r.vitality) : 0;
+      l.luck = r.luck ? Number(r.luck) : 0;
       entities.push(l);
     } catch (err) {
       errors.push({ row: i + 1, error: String(err), raw: r });

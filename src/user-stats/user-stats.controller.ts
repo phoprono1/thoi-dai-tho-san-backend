@@ -32,27 +32,12 @@ export class UserStatsController {
     return this.userStatsService.findAll();
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Lấy user stats theo ID' })
-  @ApiParam({ name: 'id', description: 'ID của user stat' })
-  @ApiResponse({
-    status: 200,
-    description: 'Thông tin user stat',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Không tìm thấy user stat',
-  })
-  findOne(@Param('id') id: string): Promise<UserStat | null> {
-    return this.userStatsService.findOne(+id);
-  }
-
   @Get('user/:userId')
   @ApiOperation({ summary: 'Lấy user stats theo user ID' })
   @ApiParam({ name: 'userId', description: 'ID của user' })
   @ApiResponse({
     status: 200,
-    description: 'User stats của người dùng',
+    description: 'Thông tin user stats',
   })
   @ApiResponse({
     status: 404,
@@ -60,6 +45,33 @@ export class UserStatsController {
   })
   findByUserId(@Param('userId') userId: string): Promise<UserStat | null> {
     return this.userStatsService.findByUserId(+userId);
+  }
+
+  @Get('user/:userId/total-stats')
+  @ApiOperation({
+    summary: 'Lấy tổng core attributes bao gồm tất cả buff sources',
+  })
+  @ApiParam({ name: 'userId', description: 'ID của user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Tổng core attributes với tất cả bonuses',
+    schema: {
+      type: 'object',
+      properties: {
+        str: { type: 'number', example: 25 },
+        int: { type: 'number', example: 22 },
+        dex: { type: 'number', example: 20 },
+        vit: { type: 'number', example: 28 },
+        luk: { type: 'number', example: 15 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy user stats',
+  })
+  getTotalStatsWithAllBonuses(@Param('userId') userId: string) {
+    return this.userStatsService.getTotalStatsWithAllBonuses(+userId);
   }
 
   @Post()

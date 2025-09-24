@@ -31,11 +31,14 @@ async function bootstrapWorker() {
         const batch = ids.slice(i, i + batchSize);
         for (const uid of batch) {
           try {
-            await userStatsService.recomputeAndPersistForUser(uid);
-            processed++;
+            // Stats are now calculated on-demand, just ensure user stats exist
+            const userStat = await userStatsService.findByUserId(uid);
+            if (userStat) {
+              processed++;
+            }
           } catch (err: unknown) {
             console.error(
-              'Backfill user failed',
+              'Check user stat failed',
               uid,
               (err as any)?.message || err,
             );

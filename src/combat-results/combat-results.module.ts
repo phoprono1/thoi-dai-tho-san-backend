@@ -16,6 +16,7 @@ import { UserStaminaModule } from '../user-stamina/user-stamina.module';
 import { Monster } from '../monsters/monster.entity';
 import { MonstersModule } from '../monsters/monsters.module';
 import { ItemsModule } from '../items/items.module';
+import { SkillModule } from '../player-skills/skill.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ItemsModule } from '../items/items.module';
     UserStaminaModule,
     MonstersModule,
     ItemsModule,
+    SkillModule,
   ],
   providers: [CombatResultsService],
   controllers: [CombatResultsController],

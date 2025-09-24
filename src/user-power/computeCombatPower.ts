@@ -1,5 +1,6 @@
 import { UserStat } from '../user-stats/user-stat.entity';
 import { UserItem } from '../user-items/user-item.entity';
+import { deriveCombatStats } from '../combat-engine/stat-converter';
 
 export type ComputeOptions = {
   exponent?: number; // p
@@ -54,11 +55,16 @@ export function computeCombatPowerFromStats(
     ...(opts.stack || {}),
   };
 
-  const STR = Math.max(0, userStat.strength || 0);
-  const INT = Math.max(0, userStat.intelligence || 0);
-  const DEX = Math.max(0, userStat.dexterity || 0);
-  const VIT = Math.max(0, userStat.vitality || 0);
-  const LUK = Math.max(0, userStat.luck || 0);
+  const STR =
+    Math.max(0, userStat.strength || 0) + (userStat.strengthPoints || 0);
+  const INT =
+    Math.max(0, userStat.intelligence || 0) +
+    (userStat.intelligencePoints || 0);
+  const DEX =
+    Math.max(0, userStat.dexterity || 0) + (userStat.dexterityPoints || 0);
+  const VIT =
+    Math.max(0, userStat.vitality || 0) + (userStat.vitalityPoints || 0);
+  const LUK = Math.max(0, userStat.luck || 0) + (userStat.luckPoints || 0);
 
   const eff = (a: number) => Math.pow(a, p);
 
@@ -93,17 +99,25 @@ export function computeCombatPowerFromStats(
       stackMultiplier = 1;
     }
 
-    equipAttackFlat += (s.attack || 0) * stackMultiplier;
+    // Calculate derived stats from item's core attributes
+    const itemDerivedStats = deriveCombatStats({
+      baseAttack: 0, // Items don't have base stats, only bonuses
+      baseMaxHp: 0,
+      baseDefense: 0,
+      ...s, // Spread the core attributes from item stats
+    });
+
+    equipAttackFlat += (itemDerivedStats.attack || 0) * stackMultiplier;
     // items currently don't have multiplicative fields in schema; keep attackMult 0
     equipAttackMult += 0;
-    equipHpFlat += (s.hp || 0) * stackMultiplier;
+    equipHpFlat += (itemDerivedStats.maxHp || 0) * stackMultiplier;
     equipHpMult += 0;
-    equipDefFlat += (s.defense || 0) * stackMultiplier;
+    equipDefFlat += (itemDerivedStats.defense || 0) * stackMultiplier;
   }
 
-  const baseAttack = userStat.attack || 0;
-  const baseMaxHp = userStat.maxHp || 0;
-  const baseDefense = userStat.defense || 0;
+  const baseAttack = 10; // Base attack constant
+  const baseMaxHp = 100; // Base HP constant
+  const baseDefense = 5; // Base defense constant
 
   const finalAttack =
     Math.floor(

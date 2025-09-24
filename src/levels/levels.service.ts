@@ -56,47 +56,63 @@ export class LevelsService {
     return levels[0].experienceRequired;
   }
 
-  // Tính tổng stats từ level 1 đến level hiện tại (Additive system)
+  // Tính tổng core attribute bonuses từ level 1 đến level hiện tại (Additive system)
   async getTotalLevelStats(targetLevel: number): Promise<{
-    maxHp: number;
-    attack: number;
-    defense: number;
+    strength: number;
+    intelligence: number;
+    dexterity: number;
+    vitality: number;
+    luck: number;
   }> {
     const levels = await this.levelsRepository
       .createQueryBuilder('level')
-      .select(['level.maxHp', 'level.attack', 'level.defense'])
+      .select([
+        'level.strength',
+        'level.intelligence',
+        'level.dexterity',
+        'level.vitality',
+        'level.luck',
+      ])
       .where('level.level <= :targetLevel', { targetLevel })
       .orderBy('level.level', 'ASC')
       .getMany();
 
     const totalStats = {
-      maxHp: 0,
-      attack: 0,
-      defense: 0,
+      strength: 0,
+      intelligence: 0,
+      dexterity: 0,
+      vitality: 0,
+      luck: 0,
     };
 
     for (const level of levels) {
-      totalStats.maxHp += level.maxHp || 0;
-      totalStats.attack += level.attack || 0;
-      totalStats.defense += level.defense || 0;
+      totalStats.strength += level.strength || 0;
+      totalStats.intelligence += level.intelligence || 0;
+      totalStats.dexterity += level.dexterity || 0;
+      totalStats.vitality += level.vitality || 0;
+      totalStats.luck += level.luck || 0;
     }
 
     return totalStats;
   }
 
-  // Tính stats của level cụ thể
+  // Tính core attribute bonuses của level cụ thể
   async getLevelStats(levelNumber: number): Promise<{
-    maxHp: number;
-    attack: number;
-    defense: number;
+    strength: number;
+    intelligence: number;
+    dexterity: number;
+    vitality: number;
+    luck: number;
   } | null> {
     const level = await this.findByLevel(levelNumber);
     if (!level) return null;
 
     return {
-      maxHp: level.maxHp || 0,
-      attack: level.attack || 0,
-      defense: level.defense || 0,
+      strength: level.strength || 0,
+      intelligence: level.intelligence || 0,
+      dexterity: level.dexterity || 0,
+      vitality: level.vitality || 0,
+      luck: level.luck || 0,
     };
   }
 }

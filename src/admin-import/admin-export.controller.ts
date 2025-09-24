@@ -195,11 +195,11 @@ export class AdminExportController {
             name: r.name,
             experienceRequired: r.experienceRequired,
             rewards: JSON.stringify(r.rewards || {}),
-            maxHp: r.maxHp,
-            maxMp: r.maxMp,
-            attack: r.attack,
-            defense: r.defense,
-            speed: r.speed,
+            strength: r.strength,
+            intelligence: r.intelligence,
+            dexterity: r.dexterity,
+            vitality: r.vitality,
+            luck: r.luck,
           });
         });
       } else if (resource === 'dungeons') {

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CharacterClassController } from './character-class.controller';
 import { MappingsController } from './mappings.controller';
+import { AdminCharacterClassesController } from './admin-character-classes.controller';
 import { CharacterClassService } from './character-class.service';
 import { AdvancementService } from './advancement.service';
 import { CharacterClass, CharacterAdvancement } from './character-class.entity';
@@ -42,7 +43,11 @@ import { UserPowerModule } from '../user-power/user-power.module';
     EventsModule,
     UserPowerModule,
   ],
-  controllers: [CharacterClassController, MappingsController],
+  controllers: [
+    CharacterClassController,
+    MappingsController,
+    AdminCharacterClassesController,
+  ],
   providers: [CharacterClassService, AdvancementService],
   exports: [CharacterClassService, AdvancementService],
 })

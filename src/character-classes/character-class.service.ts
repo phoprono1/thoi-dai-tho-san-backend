@@ -1,7 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 // CharacterClassService
@@ -342,7 +340,7 @@ export class CharacterClassService {
         }
       }
 
-      // Calculate stat changes (additive bonuses)
+      // Calculate stat changes (core attribute bonuses only)
       const newStats = targetClass.statBonuses;
       const statChanges = {
         strength: newStats.strength || 0,
@@ -350,14 +348,6 @@ export class CharacterClassService {
         dexterity: newStats.dexterity || 0,
         vitality: newStats.vitality || 0,
         luck: newStats.luck || 0,
-        critRate: newStats.critRate || 0,
-        critDamage: newStats.critDamage || 0,
-        comboRate: newStats.comboRate || 0,
-        counterRate: newStats.counterRate || 0,
-        lifesteal: newStats.lifesteal || 0,
-        armorPen: newStats.armorPen || 0,
-        dodgeRate: newStats.dodgeRate || 0,
-        accuracy: newStats.accuracy || 0,
       };
 
       // Debug: log stat bonus details to help trace why client doesn't see buffs
@@ -442,16 +432,7 @@ export class CharacterClassService {
 
       await queryRunner.commitTransaction();
 
-      // Recompute stats using centralized service AFTER transaction commit
-      // to ensure class bonuses are loaded correctly from the updated user record
-      try {
-        await this.userStatsService.recomputeAndPersistForUser(dto.userId);
-      } catch (e) {
-        console.warn(
-          'Failed to recompute stats after advancement:',
-          e?.message || e,
-        );
-      }
+      // Stats are now calculated on-demand from core attributes, no need to recompute
 
       // Log the saved userStats row for verification
       try {

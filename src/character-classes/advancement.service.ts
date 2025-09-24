@@ -154,14 +154,6 @@ export class AdvancementService implements OnModuleInit {
             dexterity: (newS.dexterity || 0) - (oldS.dexterity || 0),
             vitality: (newS.vitality || 0) - (oldS.vitality || 0),
             luck: (newS.luck || 0) - (oldS.luck || 0),
-            critRate: (newS.critRate || 0) - (oldS.critRate || 0),
-            critDamage: (newS.critDamage || 0) - (oldS.critDamage || 0),
-            comboRate: (newS.comboRate || 0) - (oldS.comboRate || 0),
-            counterRate: (newS.counterRate || 0) - (oldS.counterRate || 0),
-            lifesteal: (newS.lifesteal || 0) - (oldS.lifesteal || 0),
-            armorPen: (newS.armorPen || 0) - (oldS.armorPen || 0),
-            dodgeRate: (newS.dodgeRate || 0) - (oldS.dodgeRate || 0),
-            accuracy: (newS.accuracy || 0) - (oldS.accuracy || 0),
           };
 
           userStats.strength += delta.strength;
@@ -169,19 +161,8 @@ export class AdvancementService implements OnModuleInit {
           userStats.dexterity += delta.dexterity;
           userStats.vitality += delta.vitality;
           userStats.luck += delta.luck;
-          userStats.critRate += delta.critRate;
-          userStats.critDamage += delta.critDamage;
-          userStats.comboRate += delta.comboRate;
-          userStats.counterRate += delta.counterRate;
-          userStats.lifesteal += delta.lifesteal;
-          userStats.armorPen += delta.armorPen;
-          userStats.dodgeRate += delta.dodgeRate;
-          userStats.accuracy += delta.accuracy;
 
-          userStats.maxHp = Math.floor(userStats.vitality * 10);
-          userStats.attack = Math.floor(userStats.strength * 2);
-          userStats.defense = Math.floor(userStats.vitality * 1.5);
-
+          // Derived stats are now calculated on-demand, no need to set them manually
           await qr.manager.save(userStats);
         }
 
@@ -354,14 +335,6 @@ export class AdvancementService implements OnModuleInit {
           dexterity: (newS.dexterity || 0) - (oldS.dexterity || 0),
           vitality: (newS.vitality || 0) - (oldS.vitality || 0),
           luck: (newS.luck || 0) - (oldS.luck || 0),
-          critRate: (newS.critRate || 0) - (oldS.critRate || 0),
-          critDamage: (newS.critDamage || 0) - (oldS.critDamage || 0),
-          comboRate: (newS.comboRate || 0) - (oldS.comboRate || 0),
-          counterRate: (newS.counterRate || 0) - (oldS.counterRate || 0),
-          lifesteal: (newS.lifesteal || 0) - (oldS.lifesteal || 0),
-          armorPen: (newS.armorPen || 0) - (oldS.armorPen || 0),
-          dodgeRate: (newS.dodgeRate || 0) - (oldS.dodgeRate || 0),
-          accuracy: (newS.accuracy || 0) - (oldS.accuracy || 0),
         };
 
         uStats.strength += delta.strength;
@@ -369,19 +342,8 @@ export class AdvancementService implements OnModuleInit {
         uStats.dexterity += delta.dexterity;
         uStats.vitality += delta.vitality;
         uStats.luck += delta.luck;
-        uStats.critRate += delta.critRate;
-        uStats.critDamage += delta.critDamage;
-        uStats.comboRate += delta.comboRate;
-        uStats.counterRate += delta.counterRate;
-        uStats.lifesteal += delta.lifesteal;
-        uStats.armorPen += delta.armorPen;
-        uStats.dodgeRate += delta.dodgeRate;
-        uStats.accuracy += delta.accuracy;
 
-        uStats.maxHp = Math.floor(uStats.vitality * 10);
-        uStats.attack = Math.floor(uStats.strength * 2);
-        uStats.defense = Math.floor(uStats.vitality * 1.5);
-
+        // Derived stats are now calculated on-demand, no need to set them manually
         await runner.manager.save(uStats);
       }
 
@@ -464,14 +426,6 @@ export class AdvancementService implements OnModuleInit {
           dexterity: (newS.dexterity || 0) - (oldS.dexterity || 0),
           vitality: (newS.vitality || 0) - (oldS.vitality || 0),
           luck: (newS.luck || 0) - (oldS.luck || 0),
-          critRate: (newS.critRate || 0) - (oldS.critRate || 0),
-          critDamage: (newS.critDamage || 0) - (oldS.critDamage || 0),
-          comboRate: (newS.comboRate || 0) - (oldS.comboRate || 0),
-          counterRate: (newS.counterRate || 0) - (oldS.counterRate || 0),
-          lifesteal: (newS.lifesteal || 0) - (oldS.lifesteal || 0),
-          armorPen: (newS.armorPen || 0) - (oldS.armorPen || 0),
-          dodgeRate: (newS.dodgeRate || 0) - (oldS.dodgeRate || 0),
-          accuracy: (newS.accuracy || 0) - (oldS.accuracy || 0),
         };
 
         uStats.strength += delta.strength;
@@ -479,19 +433,8 @@ export class AdvancementService implements OnModuleInit {
         uStats.dexterity += delta.dexterity;
         uStats.vitality += delta.vitality;
         uStats.luck += delta.luck;
-        uStats.critRate += delta.critRate;
-        uStats.critDamage += delta.critDamage;
-        uStats.comboRate += delta.comboRate;
-        uStats.counterRate += delta.counterRate;
-        uStats.lifesteal += delta.lifesteal;
-        uStats.armorPen += delta.armorPen;
-        uStats.dodgeRate += delta.dodgeRate;
-        uStats.accuracy += delta.accuracy;
 
-        uStats.maxHp = Math.floor(uStats.vitality * 10);
-        uStats.attack = Math.floor(uStats.strength * 2);
-        uStats.defense = Math.floor(uStats.vitality * 1.5);
-
+        // Derived stats are now calculated on-demand, no need to set them manually
         await runner.manager.save(uStats);
       }
 

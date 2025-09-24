@@ -6,6 +6,7 @@ import {
   Param,
   Put,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,6 +17,8 @@ import {
 } from '@nestjs/swagger';
 import { LevelsService } from './levels.service';
 import { Level } from './level.entity';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @ApiTags('levels')
 @Controller('levels')
@@ -63,6 +66,7 @@ export class LevelsController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Tạo level mới' })
   @ApiBody({
     schema: {
@@ -70,11 +74,12 @@ export class LevelsController {
       properties: {
         level: { type: 'number', example: 1, minimum: 1 },
         experienceRequired: { type: 'number', example: 100, minimum: 0 },
-        maxHp: { type: 'number', example: 100, minimum: 1 },
-        maxMp: { type: 'number', example: 50, minimum: 0 },
-        attack: { type: 'number', example: 10, minimum: 0 },
-        defense: { type: 'number', example: 5, minimum: 0 },
-        speed: { type: 'number', example: 8, minimum: 0 },
+        strength: { type: 'number', example: 1, minimum: 0 },
+        intelligence: { type: 'number', example: 1, minimum: 0 },
+        dexterity: { type: 'number', example: 1, minimum: 0 },
+        vitality: { type: 'number', example: 1, minimum: 0 },
+        luck: { type: 'number', example: 1, minimum: 0 },
+        attributePointsReward: { type: 'number', example: 5, minimum: 0 },
       },
     },
   })
@@ -91,6 +96,7 @@ export class LevelsController {
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Cập nhật thông tin level' })
   @ApiParam({ name: 'id', description: 'ID của level' })
   @ApiBody({
@@ -99,11 +105,12 @@ export class LevelsController {
       properties: {
         level: { type: 'number', example: 2 },
         experienceRequired: { type: 'number', example: 200 },
-        maxHp: { type: 'number', example: 120 },
-        maxMp: { type: 'number', example: 60 },
-        attack: { type: 'number', example: 12 },
-        defense: { type: 'number', example: 6 },
-        speed: { type: 'number', example: 9 },
+        strength: { type: 'number', example: 2 },
+        intelligence: { type: 'number', example: 2 },
+        dexterity: { type: 'number', example: 2 },
+        vitality: { type: 'number', example: 2 },
+        luck: { type: 'number', example: 2 },
+        attributePointsReward: { type: 'number', example: 6 },
       },
     },
   })
@@ -123,6 +130,7 @@ export class LevelsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Xóa level' })
   @ApiParam({ name: 'id', description: 'ID của level' })
   @ApiResponse({
