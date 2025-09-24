@@ -94,31 +94,61 @@ export class UsersService {
     try {
       // Order deletes to avoid FK constraint violations where possible.
       // Delete mailbox, market offers, market listings, purchase_history, escrow
+      this.logger.log(`Starting account removal for user ${id}`);
       await queryRunner.manager.delete('mailbox', { userId: id });
-      await queryRunner.manager.delete('market_offer', { buyerId: id });
-      await queryRunner.manager.delete('market_listing', { sellerId: id });
-      await queryRunner.manager.delete('purchase_history', { buyerId: id });
-      await queryRunner.manager.delete('purchase_history', { sellerId: id });
-      await queryRunner.manager.delete('escrow', { buyerId: id });
+      this.logger.log('Deleted mailbox');
+      // Note: market_offer, market_listing, purchase_history, escrow tables may not exist in current schema
+      // await queryRunner.manager.delete('market_offer', { buyerId: id });
+      // await queryRunner.manager.delete('market_listing', { sellerId: id });
+      // await queryRunner.manager.delete('purchase_history', { buyerId: id });
+      // await queryRunner.manager.delete('purchase_history', { sellerId: id });
+      // await queryRunner.manager.delete('escrow', { buyerId: id });
+      this.logger.log('Skipped market and escrow data (tables may not exist)');
 
       // User items, upgrade logs
       await queryRunner.manager.delete('upgrade_log', { userId: id });
       await queryRunner.manager.delete('user_item', { userId: id });
+      this.logger.log('Deleted user items and upgrade logs');
 
       // User quests, quest tracking
       await queryRunner.manager.delete('quest_combat_tracking', { userId: id });
       await queryRunner.manager.delete('user_quests', { userId: id });
+      this.logger.log('Deleted user quests');
 
       // User stats, stamina, power
       await queryRunner.manager.delete('user_stat', { userId: id });
       await queryRunner.manager.delete('user_stamina', { userId: id });
       await queryRunner.manager.delete('user_power', { userId: id });
+      this.logger.log('Deleted user stats');
+
+      // Player skills and donors
+      // await queryRunner.manager.delete('player_skills', { userId: id }); // Table may not exist
+      await queryRunner.manager.delete('donors', { userId: id });
+      this.logger.log('Deleted donors (skipped player_skills)');
+
+      // Combat logs and results
+      await queryRunner.manager.delete('combat_log', { userId: id });
+      // For combat_result, we need to handle the userIds array
+      const combatResults: Array<{ id: number }> =
+        await queryRunner.manager.query(
+          `SELECT id FROM combat_result WHERE EXISTS (SELECT 1 FROM json_array_elements_text("userIds"::json) AS elem WHERE elem::int = $1)`,
+          [id],
+        );
+      for (const result of combatResults) {
+        await queryRunner.manager.delete('combat_result', { id: result.id });
+      }
+      this.logger.log('Deleted combat logs and results');
+
+      // World boss damage rankings and combat logs
+      await queryRunner.manager.delete('boss_damage_ranking', { userId: id });
+      await queryRunner.manager.delete('boss_combat_log', { userId: id });
+      this.logger.log('Deleted boss data');
 
       // Guild membership and related references
       // If user is a leader of any guilds, attempt to transfer leadership
       const leaderGuilds: Array<{ id: number }> =
         await queryRunner.manager.query(
-          `SELECT id FROM guilds WHERE leaderId = $1`,
+          `SELECT id FROM guild WHERE "leaderId" = $1`,
           [id],
         );
       const leaderChanges: GuildLeaderChangedPayload[] = [];
@@ -146,7 +176,7 @@ export class UsersService {
         if (promoteTo) {
           // Update guild leaderId and set new member role to LEADER
           await queryRunner.manager.update(
-            'guilds',
+            'guild',
             { id: g.id },
             { leaderId: promoteTo },
           );
@@ -164,7 +194,7 @@ export class UsersService {
         } else {
           // No members left, set leaderId to null
           await queryRunner.manager.update(
-            'guilds',
+            'guild',
             { id: g.id },
             { leaderId: null },
           );
@@ -179,17 +209,20 @@ export class UsersService {
 
       // Now delete guild membership rows for this user
       await queryRunner.manager.delete('guild_members', { userId: id });
+      this.logger.log('Handled guild leadership and membership');
 
-      // Chat messages, combat logs, pvp players, room_player
+      // Chat messages, pvp players, room_player
       await queryRunner.manager.delete('chat_messages', { userId: id });
-      await queryRunner.manager.delete('boss_combat_log', { userId: id });
       await queryRunner.manager.delete('pvp_players', { userId: id });
       await queryRunner.manager.delete('room_player', { playerId: id });
+      this.logger.log('Deleted chat, pvp, and room data');
 
       // Finally remove the user row
       await queryRunner.manager.delete('user', { id });
+      this.logger.log('Deleted user row');
 
       await queryRunner.commitTransaction();
+      this.logger.log(`Successfully removed account for user ${id}`);
 
       // Emit guild leader change events after successful commit so listeners
       // (e.g. ChatGateway) will broadcast only persisted changes.
@@ -207,7 +240,12 @@ export class UsersService {
       }
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      this.logger.error('Failed to remove account: ' + (err as Error).message);
+      this.logger.error(
+        'Failed to remove account: ' +
+          (err as Error).message +
+          '\n' +
+          (err as Error).stack,
+      );
       throw err;
     } finally {
       await queryRunner.release();

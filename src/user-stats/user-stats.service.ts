@@ -5,6 +5,8 @@ import { UserStat } from './user-stat.entity';
 import { UserPowerService } from '../user-power/user-power.service';
 import { LevelsService } from '../levels/levels.service';
 import { UserItemsService } from '../user-items/user-items.service';
+import { ItemSetsService } from '../items/item-sets.service';
+import { SetBonusType } from '../items/item-set.entity';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class UserStatsService {
     private readonly levelsService: LevelsService,
     @Inject(forwardRef(() => UserItemsService))
     private readonly userItemsService: UserItemsService,
+    private readonly itemSetsService: ItemSetsService,
     @InjectRepository(User)
     private usersRepository: Repository<User>,
   ) {}
@@ -419,6 +422,63 @@ export class UserStatsService {
 
         // Note: upgradeStats only contains combat stats, not core attributes
         // Core attribute bonuses come from the base item stats above
+      }
+
+      // 5. Set bonuses (temporary when equipped set pieces)
+      try {
+        // Group equipped items by setId
+        const setCounts: Record<number, number> = {};
+        for (const userItem of equippedItems) {
+          if (userItem.item?.setId) {
+            setCounts[userItem.item.setId] =
+              (setCounts[userItem.item.setId] || 0) + 1;
+          }
+        }
+
+        // Apply set bonuses for each set that has enough pieces
+        for (const [setId, pieceCount] of Object.entries(setCounts)) {
+          const setIdNum = parseInt(setId);
+          if (isNaN(setIdNum)) continue;
+
+          // Get item set with bonuses
+          const itemSet = await this.itemSetsService.findOne(setIdNum);
+          if (!itemSet?.setBonuses) continue;
+
+          // Apply bonuses for each threshold met
+          for (const bonus of itemSet.setBonuses) {
+            if (pieceCount >= bonus.pieces) {
+              // Only apply core stat bonuses (str, int, dex, vit, luk)
+              const bonusStats = bonus.stats;
+              if (bonus.type === SetBonusType.FLAT) {
+                totalStr += bonusStats.strength || 0;
+                totalInt += bonusStats.intelligence || 0;
+                totalDex += bonusStats.dexterity || 0;
+                totalVit += bonusStats.vitality || 0;
+                totalLuk += bonusStats.luck || 0;
+              } else if (bonus.type === SetBonusType.PERCENTAGE) {
+                // For percentage bonuses, calculate based on current total stats (including all previous bonuses)
+                // This creates better stacking effects
+                totalStr += Math.floor(
+                  totalStr * ((bonusStats.strength || 0) / 100),
+                );
+                totalInt += Math.floor(
+                  totalInt * ((bonusStats.intelligence || 0) / 100),
+                );
+                totalDex += Math.floor(
+                  totalDex * ((bonusStats.dexterity || 0) / 100),
+                );
+                totalVit += Math.floor(
+                  totalVit * ((bonusStats.vitality || 0) / 100),
+                );
+                totalLuk += Math.floor(
+                  totalLuk * ((bonusStats.luck || 0) / 100),
+                );
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to apply set bonuses:', error);
       }
     } catch (error) {
       console.warn('Failed to get equipment bonuses:', error);

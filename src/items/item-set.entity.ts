@@ -32,18 +32,7 @@ export class ItemSet {
     pieces: number; // Number of pieces required for this bonus
     type: SetBonusType;
     stats: {
-      attack?: number;
-      defense?: number;
-      hp?: number;
-      mp?: number;
-      critRate?: number;
-      critDamage?: number;
-      comboRate?: number;
-      counterRate?: number;
-      lifesteal?: number;
-      armorPen?: number;
-      dodgeRate?: number;
-      accuracy?: number;
+      // Only core attributes (str, int, dex, vit, luk)
       strength?: number;
       intelligence?: number;
       dexterity?: number;

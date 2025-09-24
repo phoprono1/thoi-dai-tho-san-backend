@@ -20,6 +20,7 @@ import { UserPower } from '../user-power/user-power.entity';
 import { DataSource } from 'typeorm';
 import { ClassType } from '../character-classes/character-class.entity';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
+import { LevelsService } from '../levels/levels.service';
 
 @Injectable()
 export class UserItemsService {
@@ -38,6 +39,7 @@ export class UserItemsService {
     private readonly usersService: UsersService,
     private readonly userStaminaService: UserStaminaService,
     private readonly dataSource: DataSource,
+    private readonly levelsService: LevelsService,
   ) {}
 
   findAll(): Promise<UserItem[]> {
@@ -694,6 +696,7 @@ export class UserItemsService {
     // Kiểm tra có level up không
     let leveledUp = false;
     let newLevel = oldLevel;
+    let attributePointsGained = 0;
 
     try {
       await this.usersService.levelUpUser(user.id);
@@ -703,6 +706,26 @@ export class UserItemsService {
       if (updatedUser && updatedUser.level > oldLevel) {
         leveledUp = true;
         newLevel = updatedUser.level;
+
+        // Award free attribute points for level up (same logic as combat)
+        const levelData = await this.levelsService.findByLevel(newLevel);
+        if (levelData && levelData.attributePointsReward > 0) {
+          await this.userStatsService.addFreeAttributePoints(
+            user.id,
+            levelData.attributePointsReward,
+          );
+          attributePointsGained = levelData.attributePointsReward;
+        }
+
+        // Update HP to new max HP after level up
+        try {
+          await this.userStatsService.updateHpToMax(user.id);
+        } catch (err) {
+          console.warn(
+            'Failed to update HP after level up from EXP potion:',
+            err instanceof Error ? err.message : err,
+          );
+        }
       }
     } catch {
       // Nếu không đủ exp để level up, không sao
@@ -710,12 +733,13 @@ export class UserItemsService {
 
     return {
       success: true,
-      message: `Đã nhận ${expGain} EXP${leveledUp ? ` và lên level ${newLevel}!` : ''}`,
+      message: `Đã nhận ${expGain} EXP${leveledUp ? ` và lên level ${newLevel}!` : ''}${attributePointsGained > 0 ? ` Nhận ${attributePointsGained} điểm thuộc tính.` : ''}`,
       effects: {
         expGained: expGain,
         oldLevel,
         newLevel,
         leveledUp,
+        attributePointsGained,
         totalExp: user.experience,
       },
     };

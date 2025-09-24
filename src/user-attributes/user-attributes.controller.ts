@@ -67,10 +67,13 @@ export class UserAttributesController {
     return result;
   }
 
-    @Post('allocate-multiple')
+  @Post('allocate-multiple')
   async allocateMultipleAttributePoints(
     @Request() req,
-    @Body() body: { allocations: Record<'STR' | 'INT' | 'DEX' | 'VIT' | 'LUK', number> },
+    @Body()
+    body: {
+      allocations: Record<'STR' | 'INT' | 'DEX' | 'VIT' | 'LUK', number>;
+    },
   ) {
     const userId = req.user.id as number;
     const { allocations } = body;

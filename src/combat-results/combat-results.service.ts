@@ -73,7 +73,9 @@ export class CombatResultsService {
     let totalLUK = user.stats.luck;
 
     // Level bonuses (cumulative from level 1 to current level)
-    const levelBonuses = await this.levelsService.getTotalLevelStats(user.level);
+    const levelBonuses = await this.levelsService.getTotalLevelStats(
+      user.level,
+    );
     if (levelBonuses) {
       totalSTR += levelBonuses.strength || 0;
       totalINT += levelBonuses.intelligence || 0;

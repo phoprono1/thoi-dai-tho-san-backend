@@ -42,25 +42,30 @@ export class UsersController {
     summary: 'Xóa tài khoản hiện tại (yêu cầu xác thực mật khẩu)',
   })
   async removeMe(@Request() req, @Body() body: { currentPassword: string }) {
-    // req.user is populated by JwtStrategy
-    const user = req.user as User | null;
-    // Verify password via UsersService? We'll delegate to UsersService.removeAccount after verifying
-    // For simplicity, require that caller provides password and we verify against stored hash here.
-    const { currentPassword } = body;
-    if (!currentPassword) {
-      throw new Error('Current password required');
+    try {
+      // req.user is populated by JwtStrategy
+      const user = req.user as User | null;
+      // Verify password via UsersService? We'll delegate to UsersService.removeAccount after verifying
+      // For simplicity, require that caller provides password and we verify against stored hash here.
+      const { currentPassword } = body;
+      if (!currentPassword) {
+        throw new Error('Current password required');
+      }
+
+      // Verify current password using UsersService.findOne
+      const existing = await this.usersService.findOne(user.id);
+      if (!existing) throw new Error('User not found');
+
+      // bcrypt compare
+      const ok = await bcrypt.compare(currentPassword, existing.password);
+      if (!ok) throw new Error('Password incorrect');
+
+      await this.usersService.removeAccount(existing.id);
+      return { message: 'Account deleted' };
+    } catch (error) {
+      console.error('Error in removeMe:', error);
+      throw error;
     }
-
-    // Verify current password using UsersService.findOne
-    const existing = await this.usersService.findOne(user.id);
-    if (!existing) throw new Error('User not found');
-
-    // bcrypt compare
-    const ok = await bcrypt.compare(currentPassword, existing.password);
-    if (!ok) throw new Error('Password incorrect');
-
-    await this.usersService.removeAccount(existing.id);
-    return { message: 'Account deleted' };
   }
 
   @Get()
