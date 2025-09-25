@@ -12,6 +12,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ItemsModule } from './items/items.module';
 import { CombatResultsModule } from './combat-results/combat-results.module';
+import { DailyLoginModule } from './daily-login/daily-login.module';
 import { DungeonsModule } from './dungeons/dungeons.module';
 import { LevelsModule } from './levels/levels.module';
 import { UserItemsModule } from './user-items/user-items.module';
@@ -23,6 +24,7 @@ import { GuildModule } from './guild/guild.module';
 import { ChatModule } from './chat/chat.module';
 import { WorldBossModule } from './world-boss/world-boss.module';
 import { MailboxModule } from './mailbox/mailbox.module';
+import { GiftCodeModule } from './giftcode/giftcode.module';
 import { CharacterClassesModule } from './character-classes/character-classes.module';
 import { EventsModule } from './events/events.module';
 import { DonorsModule } from './donors/donors.module';
@@ -104,6 +106,7 @@ const ServeStaticDynamic: DynamicModule =
     UsersModule,
     ItemsModule,
     CombatResultsModule,
+    DailyLoginModule,
     DungeonsModule,
     LevelsModule,
     UserItemsModule,
@@ -115,6 +118,7 @@ const ServeStaticDynamic: DynamicModule =
     ChatModule,
     WorldBossModule,
     MailboxModule,
+    GiftCodeModule,
     CharacterClassesModule,
     DonorsModule,
     QuestModule,
