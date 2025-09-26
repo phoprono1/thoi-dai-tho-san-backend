@@ -693,42 +693,52 @@ export class UserItemsService {
     user.experience += expGain;
     await this.usersRepository.save(user);
 
-    // Kiểm tra có level up không
+    // Lặp qua từng cấp đã vượt qua và cộng điểm tự do cho từng cấp
     let leveledUp = false;
     let newLevel = oldLevel;
     let attributePointsGained = 0;
 
-    try {
-      await this.usersService.levelUpUser(user.id);
-      const updatedUser = await this.usersRepository.findOne({
-        where: { id: user.id },
-      });
-      if (updatedUser && updatedUser.level > oldLevel) {
+    // Lấy user mới nhất sau khi cộng exp
+    let updatedUser = await this.usersRepository.findOne({
+      where: { id: user.id },
+    });
+    if (!updatedUser) updatedUser = user;
+
+    while (true) {
+      const nextLevel = await this.levelsService.getNextLevel(
+        updatedUser.level,
+      );
+      if (!nextLevel) break;
+      if (updatedUser.experience >= nextLevel.experienceRequired) {
+        // Lên cấp!
+        updatedUser.level = nextLevel.level;
+        updatedUser.experience -= nextLevel.experienceRequired;
         leveledUp = true;
         newLevel = updatedUser.level;
+        await this.usersRepository.save(updatedUser);
 
-        // Award free attribute points for level up (same logic as combat)
-        const levelData = await this.levelsService.findByLevel(newLevel);
+        // Cộng điểm tự do cho từng cấp
+        const levelData = await this.levelsService.findByLevel(nextLevel.level);
         if (levelData && levelData.attributePointsReward > 0) {
           await this.userStatsService.addFreeAttributePoints(
-            user.id,
+            updatedUser.id,
             levelData.attributePointsReward,
           );
-          attributePointsGained = levelData.attributePointsReward;
+          attributePointsGained += levelData.attributePointsReward;
         }
 
-        // Update HP to new max HP after level up
+        // Update HP to new max HP sau mỗi lần lên cấp
         try {
-          await this.userStatsService.updateHpToMax(user.id);
+          await this.userStatsService.updateHpToMax(updatedUser.id);
         } catch (err) {
           console.warn(
             'Failed to update HP after level up from EXP potion:',
             err instanceof Error ? err.message : err,
           );
         }
+      } else {
+        break;
       }
-    } catch {
-      // Nếu không đủ exp để level up, không sao
     }
 
     return {
@@ -740,7 +750,7 @@ export class UserItemsService {
         newLevel,
         leveledUp,
         attributePointsGained,
-        totalExp: user.experience,
+        totalExp: updatedUser.experience,
       },
     };
   }

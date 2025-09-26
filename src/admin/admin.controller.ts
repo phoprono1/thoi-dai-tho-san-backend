@@ -11,12 +11,29 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UserStatsService } from '../user-stats/user-stats.service';
+import { AdminService } from './admin.service';
 import { Queue } from 'bullmq';
 
 @ApiTags('admin')
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly userStatsService: UserStatsService) {}
+  constructor(
+    private readonly userStatsService: UserStatsService,
+    private readonly adminService: AdminService,
+  ) {}
+  @UseGuards(JwtAuthGuard)
+  @Post('reset-all-users')
+  @ApiOperation({
+    summary: 'Admin: Reset toàn bộ người chơi về level 1 và chỉ số mặc định',
+  })
+  async resetAllUsers(@Request() req: any) {
+    const maybe = req as unknown;
+    const caller = maybe as any;
+    const isAdminCaller = !!caller?.user?.isAdmin;
+    if (!isAdminCaller) throw new ForbiddenException('Admin only');
+    const result = await this.adminService.resetAllUsers();
+    return result;
+  }
 
   @UseGuards(JwtAuthGuard)
   @Post('backfill/user/:id')

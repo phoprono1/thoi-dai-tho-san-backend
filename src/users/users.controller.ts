@@ -44,6 +44,7 @@ export class UsersController {
   async removeMe(@Request() req, @Body() body: { currentPassword: string }) {
     try {
       // req.user is populated by JwtStrategy
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const user = req.user as User | null;
       // Verify password via UsersService? We'll delegate to UsersService.removeAccount after verifying
       // For simplicity, require that caller provides password and we verify against stored hash here.
