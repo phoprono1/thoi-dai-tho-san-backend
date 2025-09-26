@@ -28,6 +28,7 @@ import { GiftCodeModule } from './giftcode/giftcode.module';
 import { CharacterClassesModule } from './character-classes/character-classes.module';
 import { EventsModule } from './events/events.module';
 import { DonorsModule } from './donors/donors.module';
+import { CraftingModule } from './crafting/crafting.module';
 import { QuestModule } from './quests/quest.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
@@ -121,6 +122,7 @@ const ServeStaticDynamic: DynamicModule =
     GiftCodeModule,
     CharacterClassesModule,
     DonorsModule,
+    CraftingModule,
     QuestModule,
     MonsterModule,
     UploadsModule,

@@ -1,0 +1,71 @@
+{
+  "name": "Weekly Dragon Boss",
+  "description": "A mighty dragon that appears every Sunday evening",
+  "dayOfWeek": "sunday",
+  "startTime": "19:00:00",
+  "durationMinutes": 120,
+  "bossTemplate": {
+    "name": "Ancient Fire Dragon",
+    "description": "A legendary dragon guarding ancient treasures. Defeat it to earn massive rewards!",
+    "level": 50,
+    "stats": {
+      "attack": 5000,
+      "defense": 3000,
+      "critRate": 15,
+      "critDamage": 200
+    },
+    "damagePhases": {
+      "phase1Threshold": 1000000,
+      "phase2Threshold": 3000000,
+      "phase3Threshold": 5000000
+    },
+    "rewards": {
+      "individual": {
+        "top1": {
+          "gold": 100000,
+          "experience": 50000,
+          "items": []
+        },
+        "top2": {
+          "gold": 70000,
+          "experience": 35000,
+          "items": []
+        },
+        "top3": {
+          "gold": 50000,
+          "experience": 25000,
+          "items": []
+        },
+        "top4to10": {
+          "gold": 30000,
+          "experience": 15000,
+          "items": []
+        },
+        "top11to30": {
+          "gold": 15000,
+          "experience": 7500,
+          "items": []
+        }
+      },
+      "guild": {
+        "top1": {
+          "gold": 200000,
+          "experience": 100000,
+          "items": []
+        },
+        "top2to5": {
+          "gold": 100000,
+          "experience": 50000,
+          "items": []
+        },
+        "top6to10": {
+          "gold": 50000,
+          "experience": 25000,
+          "items": []
+        }
+      }
+    }
+  },
+  "isActive": true,
+  "timezone": "Asia/Ho_Chi_Minh"
+}

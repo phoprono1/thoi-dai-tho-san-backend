@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MonsterService } from '../monsters/monster.service';
 import { DungeonsService } from '../dungeons/dungeons.service';
 import { ItemsService } from '../items/items.service';
+import { WorldBossService } from '../world-boss/world-boss.service';
 import { extname, join } from 'path';
 import * as fs from 'fs';
 import { parse } from 'path';
@@ -41,6 +42,7 @@ export class UploadsController {
     private monsterService: MonsterService,
     private dungeonsService: DungeonsService,
     private itemsService: ItemsService,
+    private worldBossService: WorldBossService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -323,6 +325,98 @@ export class UploadsController {
       return { path: rel, thumbnails: { small: smallRel, medium: mediumRel } };
     } catch (err) {
       console.warn('Thumbnail generation failed for item:', {
+        error: String(err),
+        file: String(file?.filename),
+      });
+      return { path: rel };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('world-boss')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          cb(null, join(process.cwd(), 'assets', 'world-boss'));
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadWorldBossImage(@UploadedFile() file: any) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/world-boss/${file.filename}`;
+    const originalPath = file.path;
+    const thumbsDir = join(process.cwd(), 'assets', 'world-boss', 'thumbs');
+    
+    // Ensure thumbs directory exists
+    if (!fs.existsSync(thumbsDir)) {
+      fs.mkdirSync(thumbsDir, { recursive: true });
+    }
+
+    try {
+      const { name } = parse(file.filename);
+      const smallName = `${name}_64.webp`;
+      const mediumName = `${name}_256.webp`;
+
+      // Try to generate thumbnails
+      const sharpLib = await import('sharp');
+      if (!sharpLib || !sharpLib.default) {
+        console.warn('Sharp not available for world boss thumbnails');
+        return { path: rel };
+      }
+
+      // Check AVIF support
+      const ext = String(file && file.filename).toLowerCase();
+      const avifSupported = Boolean(
+        (sharpLib.format &&
+          sharpLib.format.avif &&
+          sharpLib.format.avif.input) ||
+          (sharpLib.format &&
+            sharpLib.format.heif &&
+            sharpLib.format.heif.input),
+      );
+      
+      if (ext.endsWith('.avif') && !avifSupported) {
+        console.warn(
+          'AVIF upload detected but AVIF input not supported by sharp build',
+          { file: originalPath },
+        );
+        return {
+          path: rel,
+          warning: 'AVIF not supported by server; thumbnails not generated',
+        };
+      }
+
+      await sharpLib.default(originalPath)
+        .resize(64, 64, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, smallName));
+      
+      await sharpLib.default(originalPath)
+        .resize(256, 256, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, mediumName));
+
+      const smallRel = `/assets/world-boss/thumbs/${smallName}`;
+      const mediumRel = `/assets/world-boss/thumbs/${mediumName}`;
+      
+      return { 
+        path: rel, 
+        thumbnails: { small: smallRel, medium: mediumRel } 
+      };
+    } catch (err) {
+      console.warn('Thumbnail generation failed for world boss:', {
         error: String(err),
         file: String(file?.filename),
       });

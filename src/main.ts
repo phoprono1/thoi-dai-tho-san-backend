@@ -2,14 +2,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { join } from 'path';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient, RedisClientType } from 'redis';
 
@@ -122,7 +122,7 @@ async function bootstrap() {
     // doesn't align with the runtime working directory in different
     // deployment setups.
     const root = path.join(process.cwd(), 'assets');
-    const subdirs = ['monsters', 'dungeons', 'items'];
+    const subdirs = ['monsters', 'dungeons', 'items', 'world-boss'];
     if (!fs.existsSync(root)) {
       fs.mkdirSync(root, { recursive: true });
       // create a simple README so the folder is self-describing if someone
@@ -130,7 +130,7 @@ async function bootstrap() {
       try {
         fs.writeFileSync(
           path.join(root, 'README.md'),
-          '# Assets\n\nPlace monster, dungeon, and item images in the corresponding subfolders: monsters/, dungeons/, items/\n',
+          '# Assets\n\nPlace monster, dungeon, item, and world boss images in the corresponding subfolders: monsters/, dungeons/, items/, world-boss/\n',
         );
       } catch (e) {
         // ignore write failures
@@ -153,6 +153,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors();
+
+  // Serve static files
+  const express = await import('express');
+  app.use('/assets', express.static(join(process.cwd(), 'assets')));
 
   app.setGlobalPrefix('api');
 

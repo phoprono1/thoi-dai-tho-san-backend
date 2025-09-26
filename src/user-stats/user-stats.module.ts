@@ -9,6 +9,7 @@ import { UserItem } from '../user-items/user-item.entity';
 import { User } from '../users/user.entity';
 import { UserItemsModule } from '../user-items/user-items.module';
 import { ItemsModule } from '../items/items.module';
+import { GuildModule } from '../guild/guild.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ItemsModule } from '../items/items.module';
     LevelsModule,
     forwardRef(() => UserItemsModule),
     ItemsModule,
+    forwardRef(() => GuildModule),
   ],
   providers: [UserStatsService],
   controllers: [UserStatsController],

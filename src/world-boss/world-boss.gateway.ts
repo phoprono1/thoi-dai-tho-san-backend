@@ -139,4 +139,17 @@ export class WorldBossGateway
   async broadcastNewBossSpawn(bossData: any) {
     this.server.emit('newBossSpawn', bossData);
   }
+
+  // Method to broadcast ranking updates
+  async broadcastRankingUpdate(bossId: number) {
+    try {
+      const rankings = await this.worldBossService.getBossRankings(bossId);
+      this.server.emit('rankingUpdate', {
+        bossId,
+        rankings,
+      });
+    } catch (error) {
+      console.error('Failed to broadcast ranking update:', error);
+    }
+  }
 }

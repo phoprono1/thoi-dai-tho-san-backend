@@ -47,6 +47,19 @@ export class UserStatsController {
     return this.userStatsService.findByUserId(+userId);
   }
 
+  // Debug endpoint to check user stats with guild buffs
+  @Get('debug/:userId/with-guild-buffs')
+  async debugUserStatsWithGuildBuffs(@Param('userId') userId: string): Promise<any> {
+    const userStats = await this.userStatsService.findByUserId(+userId);
+    const totalStats = await this.userStatsService.getTotalStatsWithAllBonuses(+userId);
+    
+    return {
+      baseStats: userStats,
+      totalStatsWithAllBonuses: totalStats,
+      userId: +userId
+    };
+  }
+
   @Get('user/:userId/total-stats')
   @ApiOperation({
     summary: 'Lấy tổng core attributes bao gồm tất cả buff sources',

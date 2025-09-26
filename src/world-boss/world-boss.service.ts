@@ -2,33 +2,44 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @types      // Determine combat action
-      const action = this.determineCombatAction(derivedStats);ipt-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { WorldBoss, BossStatus } from './world-boss.entity';
+import { WorldBoss, BossStatus, BossDisplayMode } from './world-boss.entity';
 import { BossCombatLog, CombatAction } from './boss-combat-log.entity';
 import { BossDamageRanking, RankingType } from './boss-damage-ranking.entity';
+import { BossCombatCooldown } from './boss-combat-cooldown.entity';
+import { BossSchedule } from './boss-schedule.entity';
+import { BossTemplate } from './boss-template.entity';
 import { User } from '../users/user.entity';
 import { UserStat } from '../user-stats/user-stat.entity';
+import { Guild } from '../guild/guild.entity';
 import {
   CreateWorldBossDto,
   WorldBossResponseDto,
   AttackBossDto,
   BossCombatResultDto,
+  CreateBossFromTemplateDto,
+  AssignBossToScheduleDto,
+  RemoveBossFromScheduleDto,
 } from './world-boss.dto';
 import { Mailbox, MailType } from '../mailbox/mailbox.entity';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
+import { runCombat } from '../combat-engine/engine';
+import { CombatActorInput } from '../combat-engine/types';
+import { WorldBossGateway } from './world-boss.gateway';
 
 @Injectable()
 export class WorldBossService {
+  private readonly logger = new Logger(WorldBossService.name);
   private bossTimers = new Map<number, NodeJS.Timeout>();
 
   constructor(
@@ -38,24 +49,46 @@ export class WorldBossService {
     private bossCombatLogRepository: Repository<BossCombatLog>,
     @InjectRepository(BossDamageRanking)
     private bossDamageRankingRepository: Repository<BossDamageRanking>,
+    @InjectRepository(BossCombatCooldown)
+    private bossCombatCooldownRepository: Repository<BossCombatCooldown>,
+    @InjectRepository(BossSchedule)
+    private bossScheduleRepository: Repository<BossSchedule>,
+    @InjectRepository(BossTemplate)
+    private bossTemplateRepository: Repository<BossTemplate>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @InjectRepository(UserStat)
     private userStatRepository: Repository<UserStat>,
+    @InjectRepository(Guild)
+    private guildRepository: Repository<Guild>,
     @InjectRepository(Mailbox)
     private mailboxRepository: Repository<Mailbox>,
     private dataSource: DataSource,
   ) {}
 
+  // Inject gateway after construction to avoid circular dependency
+  private gateway: WorldBossGateway;
+  
+  setGateway(gateway: WorldBossGateway) {
+    this.gateway = gateway;
+  }
+
   async createBoss(dto: CreateWorldBossDto): Promise<WorldBossResponseDto> {
     const endTime = new Date();
     endTime.setMinutes(endTime.getMinutes() + (dto.durationMinutes || 60));
 
-    const boss = this.worldBossRepository.create({
-      ...dto,
+    // Create boss with new reward structure
+    const bossData = {
+      name: dto.name,
+      description: dto.description,
+      maxHp: dto.maxHp,
       currentHp: dto.maxHp,
+      level: dto.level,
+      stats: dto.stats,
       status: BossStatus.ALIVE,
+      displayMode: BossDisplayMode.DAMAGE_BAR,
       spawnCount: 1,
+      durationMinutes: dto.durationMinutes || 60,
       endTime,
       scalingConfig: dto.scalingConfig || {
         hpMultiplier: 1.2,
@@ -63,133 +96,38 @@ export class WorldBossService {
         rewardMultiplier: 1.1,
         maxSpawnCount: 10,
       },
-    });
+      damagePhases: {
+        phase1Threshold: 1000000,
+        phase2Threshold: 2000000,
+        phase3Threshold: 3000000,
+        currentPhase: 1,
+        totalDamageReceived: 0,
+      },
+      rewards: {
+        individual: {
+          top1: { gold: 50000, experience: 25000, items: [] },
+          top2: { gold: 30000, experience: 15000, items: [] },
+          top3: { gold: 20000, experience: 10000, items: [] },
+          top4to10: { gold: 10000, experience: 5000, items: [] },
+          top11to30: { gold: 5000, experience: 2500, items: [] },
+        },
+        guild: {
+          top1: { gold: 100000, experience: 50000, items: [] },
+          top2to5: { gold: 50000, experience: 25000, items: [] },
+          top6to10: { gold: 25000, experience: 12500, items: [] },
+        },
+      },
+      maxCombatTurns: 50,
+      image: dto.image, // Add image support
+    };
 
+    const boss = this.worldBossRepository.create(bossData);
     const savedBoss = await this.worldBossRepository.save(boss);
 
     // Start timer for boss duration
     this.startBossTimer(savedBoss.id);
 
     return this.mapToResponseDto(savedBoss);
-  }
-
-  private startBossTimer(bossId: number) {
-    const timer = setTimeout(
-      async () => {
-        await this.handleBossTimeout(bossId);
-      },
-      60 * 60 * 1000,
-    ); // 1 hour
-
-    this.bossTimers.set(bossId, timer);
-  }
-
-  private async handleBossTimeout(bossId: number) {
-    const boss = await this.worldBossRepository.findOne({
-      where: { id: bossId },
-    });
-
-    if (!boss || boss.status !== BossStatus.ALIVE) {
-      return;
-    }
-
-    // Boss timeout - force defeat and respawn
-    await this.forceBossDefeat(boss);
-  }
-
-  private async forceBossDefeat(boss: WorldBoss) {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      boss.status = BossStatus.DEAD;
-      boss.currentHp = 0;
-
-      await queryRunner.manager.save(boss);
-
-      // Distribute rewards for timeout
-      // const rewards = await this.distributeRewards(queryRunner, boss.id);
-
-      // Respawn with scaling
-      await this.respawnBossWithScaling(queryRunner, boss);
-
-      await queryRunner.commitTransaction();
-
-      // Broadcast boss defeat due to timeout
-      // await this.worldBossGateway.broadcastBossDefeat(
-      //   boss.id,
-      //   new Date(Date.now() + 30000),
-      //   rewards,
-      // );
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
-    }
-  }
-
-  private async respawnBossWithScaling(queryRunner: any, oldBoss: WorldBoss) {
-    const newSpawnCount = oldBoss.spawnCount + 1;
-
-    // Check if reached max spawn count
-    if (newSpawnCount > oldBoss.scalingConfig.maxSpawnCount) {
-      // Boss permanently defeated
-      return;
-    }
-
-    const scaledBoss = queryRunner.manager.create(WorldBoss, {
-      name: `${oldBoss.name} (Wave ${newSpawnCount})`,
-      description: oldBoss.description,
-      maxHp: Math.floor(oldBoss.maxHp * oldBoss.scalingConfig.hpMultiplier),
-      currentHp: Math.floor(oldBoss.maxHp * oldBoss.scalingConfig.hpMultiplier),
-      level: oldBoss.level,
-      stats: {
-        attack: Math.floor(
-          oldBoss.stats.attack * oldBoss.scalingConfig.statMultiplier,
-        ),
-        defense: Math.floor(
-          oldBoss.stats.defense * oldBoss.scalingConfig.statMultiplier,
-        ),
-        critRate: oldBoss.stats.critRate,
-        critDamage: oldBoss.stats.critDamage,
-      },
-      status: BossStatus.ALIVE,
-      spawnCount: newSpawnCount,
-      durationMinutes: oldBoss.durationMinutes,
-      endTime: new Date(Date.now() + oldBoss.durationMinutes * 60 * 1000),
-      scalingConfig: oldBoss.scalingConfig,
-      rewards: {
-        gold: Math.floor(
-          oldBoss.rewards.gold * oldBoss.scalingConfig.rewardMultiplier,
-        ),
-        experience: Math.floor(
-          oldBoss.rewards.experience * oldBoss.scalingConfig.rewardMultiplier,
-        ),
-        items: oldBoss.rewards.items,
-      },
-    });
-
-    const savedBoss = await queryRunner.manager.save(scaledBoss);
-
-    // Start new timer
-    this.startBossTimer(savedBoss.id);
-
-    // Reset rankings for new boss
-    await this.resetRankingsForNewBoss(queryRunner, savedBoss.id);
-
-    // Broadcast new boss spawn
-    // await this.worldBossGateway.broadcastNewBossSpawn(
-    //   this.mapToResponseDto(savedBoss),
-    // );
-
-    return savedBoss;
-  }
-
-  private async resetRankingsForNewBoss(queryRunner: any, bossId: number) {
-    // Clear old rankings for new boss wave
-    await queryRunner.manager.delete(BossDamageRanking, { bossId });
   }
 
   async getCurrentBoss(): Promise<WorldBossResponseDto | null> {
@@ -205,300 +143,660 @@ export class WorldBossService {
     userId: number,
     dto: AttackBossDto,
   ): Promise<BossCombatResultDto> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const boss = await this.getCurrentBoss();
+    if (!boss) {
+      throw new NotFoundException('No active boss found');
+    }
 
-    try {
-      // Get current boss
-      const boss = await queryRunner.manager.findOne(WorldBoss, {
-        where: { status: BossStatus.ALIVE },
-      });
+    // Check if boss is still within active time
+    if (boss.endTime && new Date() > new Date(boss.endTime)) {
+      throw new BadRequestException('Boss event has ended. Combat is no longer available.');
+    }
 
-      if (!boss) {
-        throw new NotFoundException('No active world boss found');
-      }
+    // Check cooldown
+    const cooldown = await this.bossCombatCooldownRepository.findOne({
+      where: { bossId: boss.id, userId },
+    });
 
-      if (boss.status !== BossStatus.ALIVE) {
-        throw new BadRequestException('Boss is not available for attack');
-      }
-
-      // Get user and stats
-      const user = await queryRunner.manager.findOne(User, {
-        where: { id: userId },
-        relations: ['guild'],
-      });
-
-      const userStats = await queryRunner.manager.findOne(UserStat, {
-        where: { userId },
-      });
-
-      if (!user || !userStats) {
-        throw new NotFoundException('User or user stats not found');
-      }
-
-      // Calculate damage based on user's HP percentage
-      const coreAttrs = {
-        strength: userStats.strength || 0,
-        intelligence: userStats.intelligence || 0,
-        dexterity: userStats.dexterity || 0,
-        vitality: userStats.vitality || 0,
-        luck: userStats.luck || 0,
-      };
-      const derivedStats = deriveCombatStats({
-        baseAttack: 10,
-        baseMaxHp: 100,
-        baseDefense: 5,
-        ...coreAttrs,
-      });
-      const hpPercentage = (userStats.currentHp / derivedStats.maxHp) * 100;
-      const actualDamage = Math.floor(dto.damage * (hpPercentage / 100));
-
-      // Ensure damage doesn't exceed boss HP
-      const finalDamage = Math.min(actualDamage, boss.currentHp);
-      const newBossHp = boss.currentHp - finalDamage;
-
-      // Determine combat action
-      const action = this.determineCombatAction(derivedStats);
-
-      // Create combat log
-      const combatLog = queryRunner.manager.create(BossCombatLog, {
-        userId,
-        bossId: boss.id,
-        action,
-        damage: finalDamage,
-        bossHpBefore: boss.currentHp,
-        bossHpAfter: newBossHp,
-        playerStats: {
-          attack: derivedStats.attack,
-          defense: derivedStats.defense,
-          critRate: derivedStats.critRate,
-          critDamage: derivedStats.critDamage,
-          currentHp: userStats.currentHp,
-          maxHp: derivedStats.maxHp,
-        },
-        bossStats: {
-          attack: boss.stats.attack,
-          defense: boss.stats.defense,
-          currentHp: boss.currentHp,
-          maxHp: boss.maxHp,
-        },
-      });
-
-      await queryRunner.manager.save(combatLog);
-
-      // Update boss HP
-      let isBossDead = false;
-      let rewards: any = null;
-
-      if (newBossHp <= 0) {
-        // Boss defeated
-        boss.status = BossStatus.DEAD;
-        boss.currentHp = 0;
-        isBossDead = true;
-
-        // Distribute rewards
-        rewards = await this.distributeRewards(queryRunner, boss.id);
-
-        // Respawn with scaling after 30 seconds
-        setTimeout(() => {
-          void this.respawnBossWithScaling(queryRunner, boss);
-        }, 30000);
-      } else {
-        boss.currentHp = newBossHp;
-      }
-
-      await queryRunner.manager.save(boss);
-
-      // Update damage rankings
-      await this.updateDamageRanking(
-        queryRunner,
-        userId,
-        boss.id,
-        finalDamage,
-        user.guild?.id,
+    if (cooldown && new Date() < cooldown.cooldownUntil) {
+      const remainingSeconds = Math.ceil(
+        (cooldown.cooldownUntil.getTime() - Date.now()) / 1000,
       );
-
-      await queryRunner.commitTransaction();
-
-      // Broadcast boss update to all connected clients
-      // const currentBoss = await this.worldBossRepository.findOne({
-      //   where: { status: BossStatus.ALIVE },
-      // });
-      // if (currentBoss) {
-      //   await this.worldBossGateway.broadcastBossUpdate(
-      //     this.mapToResponseDto(currentBoss),
-      //   );
-      // }
-
-      return {
-        success: true,
-        damage: finalDamage,
-        bossHpBefore: boss.currentHp,
-        bossHpAfter: newBossHp,
-        isBossDead,
-        rewards,
-        nextRespawnTime: isBossDead ? new Date(Date.now() + 30000) : undefined,
-      };
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
+      throw new BadRequestException(
+        `Combat on cooldown. ${remainingSeconds} seconds remaining.`,
+      );
     }
+
+    // Get user and stats
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['characterClass'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const userStats = await this.userStatRepository.findOne({
+      where: { userId },
+    });
+
+    if (!userStats) {
+      throw new BadRequestException('User stats not found');
+    }
+
+    // Run combat simulation
+    const combatResult = await this.runBossCombat(user, userStats, boss);
+
+    // Update cooldown
+    await this.updateCombatCooldown(userId, boss.id);
+
+    // Update boss damage and rankings
+    await this.updateBossDamage(boss.id, userId, combatResult.totalDamage);
+
+    // Check if boss phase should advance
+    await this.checkPhaseAdvancement(boss.id, combatResult.totalDamage);
+
+    return {
+      success: true,
+      damage: combatResult.totalDamage,
+      bossHpBefore: boss.currentHp,
+      bossHpAfter: boss.currentHp, // Boss doesn't lose HP in damage bar mode
+      isBossDead: false,
+      combatLogs: combatResult.logs,
+      currentPhase: combatResult.newPhase,
+      totalDamageReceived: combatResult.totalBossDamage,
+    };
   }
 
-  private determineCombatAction(derivedStats: any): CombatAction {
-    const critChance = derivedStats.critRate / 100;
-    const missChance = 0.05; // 5% miss chance
+  private async runBossCombat(
+    user: User,
+    userStats: UserStat,
+    boss: WorldBossResponseDto,
+  ) {
+    // Convert user stats to combat format using base attributes
+    const playerStats = deriveCombatStats({
+      // Use base attributes from UserStat
+      STR: userStats.strength + userStats.strengthPoints,
+      INT: userStats.intelligence + userStats.intelligencePoints,
+      DEX: userStats.dexterity + userStats.dexterityPoints,
+      VIT: userStats.vitality + userStats.vitalityPoints,
+      LUK: userStats.luck + userStats.luckPoints,
+    });
 
-    const random = Math.random();
+    // Set current HP from UserStat
+    playerStats.currentMana = playerStats.maxMana;
 
-    if (random < missChance) {
-      return CombatAction.MISS;
-    } else if (random < critChance) {
-      return CombatAction.CRIT;
+    // Create boss combat stats
+    const bossStats = deriveCombatStats({
+      // Boss uses high base stats
+      baseMaxHp: 999999999, // High HP for damage bar mode
+      baseAttack: boss.stats.attack,
+      baseDefense: boss.stats.defense,
+      // Convert boss stats to attributes
+      STR: Math.floor(boss.stats.attack / 10),
+      VIT: Math.floor(boss.stats.defense / 10),
+      DEX: Math.floor(boss.stats.critRate / 2),
+      LUK: Math.floor(boss.stats.critDamage / 20),
+      INT: 50, // Default intelligence for boss
+    });
+
+    const player: CombatActorInput = {
+      id: user.id,
+      name: user.username,
+      isPlayer: true,
+      stats: playerStats,
+      currentHp: playerStats.maxHp,
+    };
+
+    const bossActor: CombatActorInput = {
+      id: `boss_${boss.id}`,
+      name: boss.name,
+      isPlayer: false,
+      stats: bossStats,
+      currentHp: bossStats.maxHp,
+    };
+
+    // Run combat for max 50 turns (boss wins after 50 turns)
+    const combatResult = runCombat({
+      players: [player],
+      enemies: [bossActor],
+      maxTurns: boss.maxCombatTurns,
+      seed: Date.now(),
+    });
+
+    // Calculate total damage dealt to boss
+    const totalDamage = combatResult.logs
+      .filter((log) => log.actorIsPlayer && log.damage && log.damage > 0)
+      .reduce((sum, log) => sum + (log.damage || 0), 0);
+
+    // Get current boss data for phase calculation
+    const currentBoss = await this.worldBossRepository.findOne({
+      where: { id: boss.id },
+    });
+
+    const newTotalDamage =
+      (currentBoss?.damagePhases.totalDamageReceived || 0) + totalDamage;
+    let newPhase = currentBoss?.damagePhases.currentPhase || 1;
+
+    // Check phase advancement
+    if (newTotalDamage >= boss.damagePhases.phase3Threshold && newPhase < 3) {
+      newPhase = 3;
+    } else if (
+      newTotalDamage >= boss.damagePhases.phase2Threshold &&
+      newPhase < 2
+    ) {
+      newPhase = 2;
+    }
+
+    return {
+      logs: combatResult.logs,
+      totalDamage,
+      newPhase,
+      totalBossDamage: newTotalDamage,
+    };
+  }
+
+  private async updateCombatCooldown(userId: number, bossId: number) {
+    const now = new Date();
+    const cooldownUntil = new Date(now.getTime() + 60 * 1000); // 1 minute cooldown
+
+    const existingCooldown = await this.bossCombatCooldownRepository.findOne({
+      where: { bossId, userId },
+    });
+
+    if (existingCooldown) {
+      existingCooldown.lastCombatTime = now;
+      existingCooldown.cooldownUntil = cooldownUntil;
+      existingCooldown.totalCombats += 1;
+      await this.bossCombatCooldownRepository.save(existingCooldown);
     } else {
-      return CombatAction.ATTACK;
+      const cooldown = this.bossCombatCooldownRepository.create({
+        bossId,
+        userId,
+        lastCombatTime: now,
+        cooldownUntil,
+        cooldownSeconds: 60,
+        totalCombats: 1,
+      });
+      await this.bossCombatCooldownRepository.save(cooldown);
     }
   }
 
-  private async updateDamageRanking(
-    queryRunner: any,
-    userId: number,
+  private async updateBossDamage(
     bossId: number,
+    userId: number,
     damage: number,
-    guildId?: number,
   ) {
     // Update individual ranking
-    let individualRanking = await queryRunner.manager.findOne(
-      BossDamageRanking,
-      {
-        where: { bossId, userId, rankingType: RankingType.INDIVIDUAL },
-      },
-    );
+    const existingRanking = await this.bossDamageRankingRepository.findOne({
+      where: { bossId, userId, rankingType: RankingType.INDIVIDUAL },
+    });
 
-    if (!individualRanking) {
-      individualRanking = queryRunner.manager.create(BossDamageRanking, {
+    if (existingRanking) {
+      existingRanking.totalDamage = Number(existingRanking.totalDamage) + Number(damage);
+      existingRanking.attackCount = Number(existingRanking.attackCount) + 1;
+      existingRanking.lastDamage = Number(damage);
+      await this.bossDamageRankingRepository.save(existingRanking);
+    } else {
+      const ranking = this.bossDamageRankingRepository.create({
         bossId,
         userId,
         rankingType: RankingType.INDIVIDUAL,
-        totalDamage: 0,
-        attackCount: 0,
+        totalDamage: damage,
+        attackCount: 1,
+        lastDamage: damage,
+        rank: 0, // Will be calculated later
       });
+      await this.bossDamageRankingRepository.save(ranking);
     }
-
-    individualRanking.totalDamage += damage;
-    individualRanking.attackCount += 1;
-    individualRanking.lastDamage = damage;
-
-    await queryRunner.manager.save(individualRanking);
 
     // Update guild ranking if user has guild
-    if (guildId) {
-      let guildRanking = await queryRunner.manager.findOne(BossDamageRanking, {
-        where: { bossId, userId: guildId, rankingType: RankingType.GUILD },
-      });
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['guild'],
+    });
 
-      if (!guildRanking) {
-        guildRanking = queryRunner.manager.create(BossDamageRanking, {
-          bossId,
-          userId: guildId,
-          guildId,
-          rankingType: RankingType.GUILD,
-          totalDamage: 0,
-          attackCount: 0,
+    if (user?.guild?.id) {
+      const existingGuildRanking =
+        await this.bossDamageRankingRepository.findOne({
+          where: {
+            bossId,
+            guildId: user.guild.id,
+            rankingType: RankingType.GUILD,
+          },
         });
+
+      if (existingGuildRanking) {
+        existingGuildRanking.totalDamage = Number(existingGuildRanking.totalDamage) + Number(damage);
+        existingGuildRanking.attackCount = Number(existingGuildRanking.attackCount) + 1;
+        existingGuildRanking.lastDamage = Number(damage);
+        await this.bossDamageRankingRepository.save(existingGuildRanking);
+      } else {
+        const guildRanking = this.bossDamageRankingRepository.create({
+          bossId,
+          userId, // Representative user for guild
+          guildId: user.guild.id,
+          rankingType: RankingType.GUILD,
+          totalDamage: damage,
+          attackCount: 1,
+          lastDamage: damage,
+          rank: 0,
+        });
+        await this.bossDamageRankingRepository.save(guildRanking);
       }
+    }
 
-      guildRanking.totalDamage += damage;
-      guildRanking.attackCount += 1;
+    // Recalculate rankings
+    await this.recalculateRankings(bossId);
 
-      await queryRunner.manager.save(guildRanking);
+    // Broadcast ranking update via WebSocket
+    if (this.gateway) {
+      await this.gateway.broadcastRankingUpdate(bossId);
     }
   }
 
-  private async distributeRewards(
-    queryRunner: any,
-    bossId: number,
-  ): Promise<any> {
-    // Get top 10 individual contributors
-    const topIndividuals = await queryRunner.manager.find(BossDamageRanking, {
-      where: { bossId, rankingType: RankingType.INDIVIDUAL },
-      order: { totalDamage: 'DESC' },
-      take: 10,
-      relations: ['user'],
+  private async checkPhaseAdvancement(bossId: number, newDamage: number) {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId },
     });
 
-    // Get top 5 guilds
-    const topGuilds = await queryRunner.manager.find(BossDamageRanking, {
-      where: { bossId, rankingType: RankingType.GUILD },
-      order: { totalDamage: 'DESC' },
-      take: 5,
-    });
+    if (!boss) return;
 
-    // Send rewards via mailbox
-    for (const ranking of topIndividuals) {
-      const rank = topIndividuals.indexOf(ranking) + 1;
-      const reward = this.calculateIndividualReward(rank, ranking.totalDamage);
+    const newTotalDamage = boss.damagePhases.totalDamageReceived + newDamage;
+    let newPhase = boss.damagePhases.currentPhase;
 
-      await queryRunner.manager.create(Mailbox, {
-        userId: ranking.userId,
-        title: `World Boss Reward - Rank ${rank}`,
-        content: `Congratulations! You ranked ${rank} in the World Boss battle with ${ranking.totalDamage} total damage.`,
-        type: MailType.REWARD,
-        rewards: reward,
-      });
+    // Check phase advancement
+    if (newTotalDamage >= boss.damagePhases.phase3Threshold && newPhase < 3) {
+      newPhase = 3;
+    } else if (
+      newTotalDamage >= boss.damagePhases.phase2Threshold &&
+      newPhase < 2
+    ) {
+      newPhase = 2;
     }
 
-    return {
-      topIndividuals: topIndividuals.length,
-      topGuilds: topGuilds.length,
-    };
+    // Update boss damage phases
+    boss.damagePhases.totalDamageReceived = newTotalDamage;
+    boss.damagePhases.currentPhase = newPhase;
+
+    await this.worldBossRepository.save(boss);
   }
 
-  private calculateIndividualReward(rank: number, totalDamage: number): any {
-    const baseGold = 1000;
-    const baseExp = 500;
-
-    const multipliers = [5, 3, 2, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2];
-    const multiplier = multipliers[rank - 1] || 0.1;
-
-    return {
-      gold: Math.floor(baseGold * multiplier),
-      experience: Math.floor(baseExp * multiplier),
-      items: [], // Could add items based on rank
-    };
-  }
-
-  async getBossRankings(bossId: number): Promise<any> {
+  private async recalculateRankings(bossId: number) {
+    // Recalculate individual rankings
     const individualRankings = await this.bossDamageRankingRepository.find({
       where: { bossId, rankingType: RankingType.INDIVIDUAL },
       order: { totalDamage: 'DESC' },
-      take: 50,
+    });
+
+    for (let i = 0; i < individualRankings.length; i++) {
+      individualRankings[i].rank = i + 1;
+      await this.bossDamageRankingRepository.save(individualRankings[i]);
+    }
+
+    // Recalculate guild rankings
+    const guildRankings = await this.bossDamageRankingRepository.find({
+      where: { bossId, rankingType: RankingType.GUILD },
+      order: { totalDamage: 'DESC' },
+    });
+
+    for (let i = 0; i < guildRankings.length; i++) {
+      guildRankings[i].rank = i + 1;
+      await this.bossDamageRankingRepository.save(guildRankings[i]);
+    }
+  }
+
+  async getBossRankings(bossId: number) {
+    const individualRankings = await this.bossDamageRankingRepository.find({
+      where: { bossId, rankingType: RankingType.INDIVIDUAL },
+      order: { totalDamage: 'DESC' },
+      take: 30,
       relations: ['user'],
     });
 
     const guildRankings = await this.bossDamageRankingRepository.find({
       where: { bossId, rankingType: RankingType.GUILD },
       order: { totalDamage: 'DESC' },
-      take: 20,
+      take: 10,
     });
 
+    // Format individual rankings
+    const formattedIndividual = individualRankings.map((ranking) => ({
+      rank: ranking.rank,
+      userId: ranking.userId,
+      username: ranking.user?.username || 'Unknown',
+      totalDamage: ranking.totalDamage,
+      attackCount: ranking.attackCount,
+      lastDamage: ranking.lastDamage,
+    }));
+
+    // Format guild rankings (need to get guild names)
+    const formattedGuild = await Promise.all(
+      guildRankings.map(async (ranking) => {
+        const guild = await this.guildRepository.findOne({
+          where: { id: ranking.guildId },
+        });
+        return {
+          rank: ranking.rank,
+          guildId: ranking.guildId,
+          guildName: guild?.name || 'Unknown Guild',
+          totalDamage: ranking.totalDamage,
+          attackCount: ranking.attackCount,
+          lastDamage: ranking.lastDamage,
+        };
+      }),
+    );
+
     return {
-      individual: individualRankings.map((r, index) => ({
-        rank: index + 1,
-        username: r.user.username,
-        totalDamage: r.totalDamage,
-        attackCount: r.attackCount,
-      })),
-      guild: guildRankings.map((r, index) => ({
-        rank: index + 1,
-        guildId: r.guildId,
-        totalDamage: r.totalDamage,
-        attackCount: r.attackCount,
-      })),
+      individual: formattedIndividual,
+      guild: formattedGuild,
     };
+  }
+
+  async endBossEvent(boss: WorldBoss) {
+    this.logger.log(`Ending boss event: ${boss.name} (ID: ${boss.id})`);
+
+    // Update boss status
+    boss.status = BossStatus.DEAD;
+    await this.worldBossRepository.save(boss);
+
+    // Distribute rewards
+    await this.distributeRewards(boss.id);
+
+    // Clear timers
+    const timer = this.bossTimers.get(boss.id);
+    if (timer) {
+      clearTimeout(timer);
+      this.bossTimers.delete(boss.id);
+    }
+  }
+
+  private async distributeRewards(bossId: number) {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId },
+    });
+
+    if (!boss) return;
+
+    const rankings = await this.getBossRankings(bossId);
+
+    // Distribute individual rewards
+    for (const ranking of rankings.individual) {
+      let rewardConfig;
+
+      if (ranking.rank === 1) {
+        rewardConfig = boss.rewards.individual.top1;
+      } else if (ranking.rank === 2) {
+        rewardConfig = boss.rewards.individual.top2;
+      } else if (ranking.rank === 3) {
+        rewardConfig = boss.rewards.individual.top3;
+      } else if (ranking.rank <= 10) {
+        rewardConfig = boss.rewards.individual.top4to10;
+      } else if (ranking.rank <= 30) {
+        rewardConfig = boss.rewards.individual.top11to30;
+      } else {
+        continue; // No reward for ranks > 30
+      }
+
+      await this.sendRewardToMailbox(
+        ranking.userId,
+        `World Boss Reward - Rank ${ranking.rank}`,
+        `Congratulations! You ranked #${ranking.rank} in the ${boss.name} battle!`,
+        rewardConfig,
+      );
+    }
+
+    // Distribute guild rewards
+    for (const guildRanking of rankings.guild) {
+      let rewardConfig;
+
+      if (guildRanking.rank === 1) {
+        rewardConfig = boss.rewards.guild.top1;
+      } else if (guildRanking.rank <= 5) {
+        rewardConfig = boss.rewards.guild.top2to5;
+      } else if (guildRanking.rank <= 10) {
+        rewardConfig = boss.rewards.guild.top6to10;
+      } else {
+        continue;
+      }
+
+      // Update guild gold fund directly
+      const guild = await this.guildRepository.findOne({
+        where: { id: guildRanking.guildId },
+      });
+
+      if (guild) {
+        guild.goldFund += rewardConfig.gold;
+        guild.experience += rewardConfig.experience;
+        await this.guildRepository.save(guild);
+
+        // Send notification to all guild members about the guild reward
+        const guildMembers = await this.userRepository.find({
+          where: { guild: { id: guildRanking.guildId } },
+          relations: ['guild'],
+        });
+
+        for (const member of guildMembers) {
+          await this.sendRewardToMailbox(
+            member.id,
+            `Guild World Boss Reward - Rank ${guildRanking.rank}`,
+            `Your guild "${guild.name}" ranked #${guildRanking.rank} in the ${boss.name} battle!\n\nGuild rewards added:\n- Gold Fund: +${rewardConfig.gold.toLocaleString()}\n- Guild EXP: +${rewardConfig.experience.toLocaleString()}`,
+            { gold: 0, experience: 0, items: rewardConfig.items || [] }, // Individual members don't get gold/exp, only items if any
+          );
+        }
+      }
+    }
+  }
+
+  private async sendRewardToMailbox(
+    userId: number,
+    title: string,
+    content: string,
+    rewards: { gold: number; experience: number; items: any[] },
+  ) {
+    const mailbox = this.mailboxRepository.create({
+      userId,
+      title,
+      content,
+      type: MailType.SYSTEM,
+      rewards: {
+        gold: rewards.gold,
+        experience: rewards.experience,
+        items: rewards.items,
+      },
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+    });
+
+    await this.mailboxRepository.save(mailbox);
+  }
+
+  private startBossTimer(bossId: number) {
+    // Get boss duration from database
+    this.worldBossRepository.findOne({ where: { id: bossId } }).then(boss => {
+      if (boss && boss.durationMinutes) {
+        const durationMs = boss.durationMinutes * 60 * 1000;
+        const timer = setTimeout(
+          async () => {
+            await this.handleBossTimeout(bossId);
+          },
+          durationMs,
+        );
+        this.bossTimers.set(bossId, timer);
+      }
+    });
+  }
+
+  private async handleBossTimeout(bossId: number) {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId },
+    });
+
+    if (!boss || boss.status !== BossStatus.ALIVE) {
+      return;
+    }
+
+    await this.endBossEvent(boss);
+  }
+
+  // New methods for template-based boss creation
+  async createBossFromTemplate(dto: CreateBossFromTemplateDto): Promise<WorldBossResponseDto> {
+    const template = await this.bossTemplateRepository.findOne({
+      where: { id: dto.templateId },
+    });
+
+    if (!template) {
+      throw new NotFoundException(`Boss template with ID ${dto.templateId} not found`);
+    }
+
+    // Validate schedule if provided
+    if (dto.scheduleId) {
+      const schedule = await this.bossScheduleRepository.findOne({
+        where: { id: dto.scheduleId },
+      });
+      if (!schedule) {
+        throw new NotFoundException(`Schedule with ID ${dto.scheduleId} not found`);
+      }
+    }
+
+    const endTime = new Date();
+    endTime.setMinutes(endTime.getMinutes() + (dto.durationMinutes || 60));
+
+    // Use template data with possible custom rewards
+    const rewards = dto.customRewards || template.defaultRewards;
+
+    const bossData = {
+      name: template.name,
+      description: template.description,
+      maxHp: 999999999, // High HP for damage bar mode
+      currentHp: 999999999,
+      level: template.level,
+      stats: template.stats,
+      status: BossStatus.ALIVE,
+      displayMode: BossDisplayMode.DAMAGE_BAR,
+      spawnCount: 1,
+      durationMinutes: dto.durationMinutes || 60,
+      endTime,
+      scalingConfig: {
+        hpMultiplier: 1.2,
+        statMultiplier: 1.15,
+        rewardMultiplier: 1.1,
+        maxSpawnCount: 10,
+      },
+      damagePhases: {
+        ...template.damagePhases,
+        currentPhase: 1,
+        totalDamageReceived: 0,
+      },
+      rewards,
+      customRewards: dto.customRewards,
+      scheduleId: dto.scheduleId,
+      templateId: dto.templateId,
+      maxCombatTurns: 50,
+      image: template.image,
+    };
+
+    const boss = this.worldBossRepository.create(bossData);
+    const savedBoss = await this.worldBossRepository.save(boss);
+
+    // Start timer for boss duration
+    this.startBossTimer(savedBoss.id);
+
+    return this.mapToResponseDto(savedBoss);
+  }
+
+  async assignBossToSchedule(dto: AssignBossToScheduleDto): Promise<WorldBossResponseDto> {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: dto.bossId },
+    });
+
+    if (!boss) {
+      throw new NotFoundException(`Boss with ID ${dto.bossId} not found`);
+    }
+
+    const schedule = await this.bossScheduleRepository.findOne({
+      where: { id: dto.scheduleId },
+    });
+
+    if (!schedule) {
+      throw new NotFoundException(`Schedule with ID ${dto.scheduleId} not found`);
+    }
+
+    boss.scheduleId = dto.scheduleId;
+    const updatedBoss = await this.worldBossRepository.save(boss);
+
+    return this.mapToResponseDto(updatedBoss);
+  }
+
+  async removeBossFromSchedule(dto: RemoveBossFromScheduleDto): Promise<WorldBossResponseDto> {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: dto.bossId },
+    });
+
+    if (!boss) {
+      throw new NotFoundException(`Boss with ID ${dto.bossId} not found`);
+    }
+
+    boss.scheduleId = null;
+    const updatedBoss = await this.worldBossRepository.save(boss);
+
+    return this.mapToResponseDto(updatedBoss);
+  }
+
+  async updateBossRewards(bossId: number, customRewards: any): Promise<WorldBossResponseDto> {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId },
+    });
+
+    if (!boss) {
+      throw new NotFoundException(`Boss with ID ${bossId} not found`);
+    }
+
+    boss.customRewards = customRewards;
+    boss.rewards = customRewards; // Update active rewards
+    const updatedBoss = await this.worldBossRepository.save(boss);
+
+    return this.mapToResponseDto(updatedBoss);
+  }
+
+  async getBossesWithTemplates(): Promise<any[]> {
+    const bosses = await this.worldBossRepository.find({
+      relations: ['template', 'schedule'],
+      order: { createdAt: 'DESC' },
+    });
+
+    return bosses.map(boss => ({
+      ...this.mapToResponseDto(boss),
+      template: boss.template,
+      schedule: boss.schedule,
+    }));
+  }
+
+  // Method to manually end boss and distribute rewards (for expired bosses)
+  async endExpiredBosses(): Promise<void> {
+    const expiredBosses = await this.worldBossRepository.find({
+      where: { status: BossStatus.ALIVE },
+    });
+
+    for (const boss of expiredBosses) {
+      if (boss.endTime && new Date() > boss.endTime) {
+        this.logger.log(`Ending expired boss: ${boss.name} (ID: ${boss.id})`);
+        await this.endBossEvent(boss);
+      }
+    }
+  }
+
+  // Public method to manually end a specific boss
+  async manuallyEndBoss(bossId: number): Promise<boolean> {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId, status: BossStatus.ALIVE },
+    });
+
+    if (boss) {
+      await this.endBossEvent(boss);
+      return true;
+    }
+    return false;
   }
 
   private mapToResponseDto(boss: WorldBoss): WorldBossResponseDto {
@@ -511,11 +809,18 @@ export class WorldBossService {
       level: boss.level,
       stats: boss.stats,
       status: boss.status,
+      displayMode: boss.displayMode,
+      respawnTime: boss.respawnTime,
       spawnCount: boss.spawnCount,
       durationMinutes: boss.durationMinutes,
       endTime: boss.endTime,
+      scheduledStartTime: boss.scheduledStartTime,
       scalingConfig: boss.scalingConfig,
+      damagePhases: boss.damagePhases,
       rewards: boss.rewards,
+      scheduleId: boss.scheduleId,
+      maxCombatTurns: boss.maxCombatTurns,
+      image: boss.image,
       createdAt: boss.createdAt,
       updatedAt: boss.updatedAt,
     };

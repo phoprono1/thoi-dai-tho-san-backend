@@ -6,6 +6,7 @@ import { UserPowerService } from '../user-power/user-power.service';
 import { LevelsService } from '../levels/levels.service';
 import { UserItemsService } from '../user-items/user-items.service';
 import { ItemSetsService } from '../items/item-sets.service';
+import { GlobalGuildBuffService } from '../guild/global-guild-buff.service';
 import { SetBonusType } from '../items/item-set.entity';
 import { User } from '../users/user.entity';
 
@@ -19,6 +20,8 @@ export class UserStatsService {
     @Inject(forwardRef(() => UserItemsService))
     private readonly userItemsService: UserItemsService,
     private readonly itemSetsService: ItemSetsService,
+    @Inject(forwardRef(() => GlobalGuildBuffService))
+    private readonly globalGuildBuffService: GlobalGuildBuffService,
     @InjectRepository(User)
     private usersRepository: Repository<User>,
   ) {}
@@ -482,6 +485,20 @@ export class UserStatsService {
       }
     } catch (error) {
       console.warn('Failed to get equipment bonuses:', error);
+    }
+
+    // 6. Guild buffs (only if user is in a guild)
+    try {
+      const guildBuffs = await this.globalGuildBuffService.getUserGuildBuffs(userId);
+      if (guildBuffs) {
+        totalStr += guildBuffs.strength || 0;
+        totalInt += guildBuffs.intelligence || 0;
+        totalDex += guildBuffs.dexterity || 0;
+        totalVit += guildBuffs.vitality || 0;
+        totalLuk += guildBuffs.luck || 0;
+      }
+    } catch (error) {
+      console.warn('Failed to get guild buffs:', error);
     }
 
     return {

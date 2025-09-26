@@ -569,7 +569,8 @@ export class UserItemsService {
         break;
 
       case ConsumableType.MP_POTION:
-        result = await this.useMpPotion(userItem, user);
+      case ConsumableType.ENERGY_POTION:
+        result = await this.useEnergyPotion(userItem, user);
         break;
 
       case ConsumableType.EXP_POTION:
@@ -578,6 +579,10 @@ export class UserItemsService {
 
       case ConsumableType.STAT_BOOST:
         result = await this.useStatBoostPotion(userItem, user);
+        break;
+
+      case ConsumableType.PERMANENT_STAT_BOOST:
+        result = await this.usePermanentStatBoost(userItem, user);
         break;
 
       default:
@@ -654,7 +659,7 @@ export class UserItemsService {
     };
   }
 
-  private useMpPotion(
+  private useEnergyPotion(
     userItem: UserItem,
     user: User,
   ): Promise<{ success: boolean; message: string; effects: any }> {
@@ -829,6 +834,96 @@ export class UserItemsService {
       message: `Đã tăng các chỉ số: ${boostMessages}`,
       effects: {
         statBoosts,
+        newStats: {
+          strength: userStats.strength,
+          intelligence: userStats.intelligence,
+          dexterity: userStats.dexterity,
+          vitality: userStats.vitality,
+          luck: userStats.luck,
+        },
+      },
+    };
+  }
+
+  private async usePermanentStatBoost(
+    userItem: UserItem,
+    user: User,
+  ): Promise<{ success: boolean; message: string; effects: any }> {
+    const userStats = await this.userStatsService.findByUserId(user.id);
+    if (!userStats) {
+      throw new BadRequestException('Không tìm thấy thông tin chỉ số người chơi');
+    }
+
+    const item = userItem.item;
+    if (!item.stats) {
+      throw new BadRequestException('Vật phẩm không có thông tin chỉ số');
+    }
+
+    // Apply permanent stat increases
+    const statBoosts: any = {};
+    
+    if (item.stats.strength) {
+      userStats.strength += item.stats.strength;
+      statBoosts.strength = item.stats.strength;
+    }
+    if (item.stats.intelligence) {
+      userStats.intelligence += item.stats.intelligence;
+      statBoosts.intelligence = item.stats.intelligence;
+    }
+    if (item.stats.dexterity) {
+      userStats.dexterity += item.stats.dexterity;
+      statBoosts.dexterity = item.stats.dexterity;
+    }
+    if (item.stats.vitality) {
+      userStats.vitality += item.stats.vitality;
+      statBoosts.vitality = item.stats.vitality;
+    }
+    if (item.stats.luck) {
+      userStats.luck += item.stats.luck;
+      statBoosts.luck = item.stats.luck;
+    }
+
+    // Save the permanent changes
+    await this.userStatsService.update(userStats.id, userStats);
+
+    // Update combat power
+    try {
+      const equippedForPower = await this.getEquippedItems(user.id);
+      const power = computeCombatPowerFromStats(
+        userStats,
+        equippedForPower || [],
+      );
+
+      const existing = await this.dataSource.manager.findOne(UserPower, {
+        where: { userId: user.id },
+      });
+      if (existing) {
+        existing.combatPower = power;
+        await this.dataSource.manager.save(UserPower, existing);
+      } else {
+        const np = this.dataSource.manager.create(UserPower, {
+          userId: user.id,
+          combatPower: power,
+        });
+        await this.dataSource.manager.save(UserPower, np);
+      }
+    } catch (err) {
+      console.warn(
+        'Failed to compute/save user power after permanent stat boost:',
+        err?.message || err,
+      );
+    }
+
+    const boostMessages = Object.entries(statBoosts)
+      .map(([stat, value]) => `${stat}: +${value}`)
+      .join(', ');
+
+    return {
+      success: true,
+      message: `Đã tăng vĩnh viễn các chỉ số: ${boostMessages}`,
+      effects: {
+        statBoosts,
+        permanent: true,
         newStats: {
           strength: userStats.strength,
           intelligence: userStats.intelligence,

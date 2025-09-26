@@ -77,6 +77,13 @@ export class Item {
   @Column({ type: 'int', nullable: true })
   duration: number; // For stat boost duration in minutes
 
+  @Column('json', { nullable: true })
+  consumableEffect: {
+    hp?: number;
+    energy?: number; // Đổi từ mp thành energy
+    exp?: number;
+  };
+
   @Column({ type: 'text', nullable: true })
   image?: string; // relative path or URL to item image (e.g. /assets/items/1.png)
 
