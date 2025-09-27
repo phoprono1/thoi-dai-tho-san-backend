@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CraftingRecipe, CraftingMaterial } from './crafting-recipe.entity';
@@ -68,11 +72,11 @@ export class CraftingService {
       where: { id },
       relations: ['resultItem'],
     });
-    
+
     if (!recipe) {
       throw new NotFoundException('Recipe not found');
     }
-    
+
     return recipe;
   }
 
@@ -81,7 +85,7 @@ export class CraftingService {
     const resultItem = await this.itemRepository.findOne({
       where: { id: dto.resultItemId },
     });
-    
+
     if (!resultItem) {
       throw new NotFoundException('Result item not found');
     }
@@ -92,7 +96,9 @@ export class CraftingService {
         where: { id: material.itemId },
       });
       if (!item) {
-        throw new NotFoundException(`Material item ${material.itemId} not found`);
+        throw new NotFoundException(
+          `Material item ${material.itemId} not found`,
+        );
       }
     }
 
@@ -100,9 +106,12 @@ export class CraftingService {
     return this.craftingRecipeRepository.save(recipe);
   }
 
-  async updateRecipe(id: number, dto: Partial<CreateCraftingRecipeDto>): Promise<CraftingRecipe> {
+  async updateRecipe(
+    id: number,
+    dto: Partial<CreateCraftingRecipeDto>,
+  ): Promise<CraftingRecipe> {
     const recipe = await this.getRecipeById(id);
-    
+
     Object.assign(recipe, dto);
     return this.craftingRecipeRepository.save(recipe);
   }
@@ -125,7 +134,7 @@ export class CraftingService {
   async craftItem(userId: number, dto: CraftItemDto): Promise<CraftingResult> {
     const recipe = await this.getRecipeById(dto.recipeId);
     const quantity = dto.quantity || 1;
-    
+
     if (!recipe.isActive) {
       throw new BadRequestException('Recipe is not active');
     }
@@ -146,7 +155,11 @@ export class CraftingService {
     }
 
     // Check materials
-    const materialCheck = await this.checkMaterials(userId, recipe.materials, quantity);
+    const materialCheck = await this.checkMaterials(
+      userId,
+      recipe.materials,
+      quantity,
+    );
     if (!materialCheck.success) {
       return materialCheck;
     }
@@ -163,19 +176,27 @@ export class CraftingService {
     await this.addItemToUser(userId, recipe.resultItemId, resultQuantity);
 
     // Handle special consumables (permanent stat boosts)
-    if (recipe.resultItem.consumableType === ConsumableType.PERMANENT_STAT_BOOST) {
-      await this.applyPermanentStatBoost(userId, recipe.resultItem, resultQuantity);
+    if (
+      recipe.resultItem.consumableType === ConsumableType.PERMANENT_STAT_BOOST
+    ) {
+      await this.applyPermanentStatBoost(
+        userId,
+        recipe.resultItem,
+        resultQuantity,
+      );
     }
 
     return {
       success: true,
       message: `Chế tạo thành công ${resultQuantity}x ${recipe.resultItem.name}!`,
-      craftedItems: [{
-        itemId: recipe.resultItemId,
-        itemName: recipe.resultItem.name,
-        quantity: resultQuantity,
-      }],
-      consumedMaterials: recipe.materials.map(m => ({
+      craftedItems: [
+        {
+          itemId: recipe.resultItemId,
+          itemName: recipe.resultItem.name,
+          quantity: resultQuantity,
+        },
+      ],
+      consumedMaterials: recipe.materials.map((m) => ({
         itemId: m.itemId,
         itemName: 'Material', // TODO: Get actual item name
         quantity: m.quantity * quantity,
@@ -229,7 +250,11 @@ export class CraftingService {
     }
   }
 
-  private async addItemToUser(userId: number, itemId: number, quantity: number): Promise<void> {
+  private async addItemToUser(
+    userId: number,
+    itemId: number,
+    quantity: number,
+  ): Promise<void> {
     let userItem = await this.userItemRepository.findOne({
       where: { userId, itemId },
     });
@@ -247,7 +272,11 @@ export class CraftingService {
     }
   }
 
-  private async applyPermanentStatBoost(userId: number, item: Item, quantity: number): Promise<void> {
+  private async applyPermanentStatBoost(
+    userId: number,
+    item: Item,
+    quantity: number,
+  ): Promise<void> {
     if (!item.stats) return;
 
     const userStat = await this.userStatRepository.findOne({

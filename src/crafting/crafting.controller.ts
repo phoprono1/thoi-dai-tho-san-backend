@@ -10,7 +10,11 @@ import {
   Request,
   Query,
 } from '@nestjs/common';
-import { CraftingService, CreateCraftingRecipeDto, CraftItemDto } from './crafting.service';
+import {
+  CraftingService,
+  CreateCraftingRecipeDto,
+  CraftItemDto,
+} from './crafting.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CraftingRecipe } from './crafting-recipe.entity';
 
@@ -26,7 +30,9 @@ export class CraftingController {
   }
 
   @Get('recipes/category/:category')
-  async getRecipesByCategory(@Param('category') category: string): Promise<CraftingRecipe[]> {
+  async getRecipesByCategory(
+    @Param('category') category: string,
+  ): Promise<CraftingRecipe[]> {
     return this.craftingService.getRecipesByCategory(parseInt(category));
   }
 
@@ -47,7 +53,9 @@ export class CraftingController {
   }
 
   @Post('admin/recipes')
-  async createRecipe(@Body() dto: CreateCraftingRecipeDto): Promise<CraftingRecipe> {
+  async createRecipe(
+    @Body() dto: CreateCraftingRecipeDto,
+  ): Promise<CraftingRecipe> {
     return this.craftingService.createRecipe(dto);
   }
 

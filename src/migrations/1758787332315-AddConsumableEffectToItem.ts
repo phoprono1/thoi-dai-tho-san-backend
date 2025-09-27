@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddConsumableEffectToItem1758787332315 implements MigrationInterface {
+export class AddConsumableEffectToItem1758787332315
+  implements MigrationInterface
+{
   name = 'AddConsumableEffectToItem1758787332315';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

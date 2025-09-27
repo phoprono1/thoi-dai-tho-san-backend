@@ -76,7 +76,7 @@ export const DEFAULT_CRAFTING_RECIPES = [
     craftingLevel: 1,
     goldCost: 10,
     craftingTime: 30,
-    category: 0
+    category: 0,
   },
   {
     name: 'Bình Thuốc Hồi Thể Lực Nhỏ',
@@ -90,7 +90,7 @@ export const DEFAULT_CRAFTING_RECIPES = [
     craftingLevel: 1,
     goldCost: 15,
     craftingTime: 30,
-    category: 0
+    category: 0,
   },
   {
     name: 'Thuốc Tăng Sức Mạnh',
@@ -105,7 +105,7 @@ export const DEFAULT_CRAFTING_RECIPES = [
     craftingLevel: 5,
     goldCost: 1000,
     craftingTime: 300,
-    category: 0
+    category: 0,
   },
   {
     name: 'Thuốc Tăng Trí Tuệ',
@@ -120,6 +120,6 @@ export const DEFAULT_CRAFTING_RECIPES = [
     craftingLevel: 5,
     goldCost: 1000,
     craftingTime: 300,
-    category: 0
-  }
+    category: 0,
+  },
 ];

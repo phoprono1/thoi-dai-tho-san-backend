@@ -25,13 +25,17 @@ export class GuildBuffController {
 
   // Get active buff for a guild's current level
   @Get('guild/:guildId/active')
-  async getActiveGuildBuff(@Param('guildId') guildId: string): Promise<GuildBuff | null> {
+  async getActiveGuildBuff(
+    @Param('guildId') guildId: string,
+  ): Promise<GuildBuff | null> {
     return this.guildBuffService.getActiveGuildBuff(parseInt(guildId));
   }
 
   // Get current user's guild buffs
   @Get('my-buffs')
-  async getMyGuildBuffs(@Request() req: any): Promise<GuildBuff['statBuffs'] | null> {
+  async getMyGuildBuffs(
+    @Request() req: any,
+  ): Promise<GuildBuff['statBuffs'] | null> {
     return this.guildBuffService.getUserGuildBuffs(req.user.id);
   }
 
@@ -51,7 +55,9 @@ export class GuildBuffController {
 
   // Initialize default buffs for a guild
   @Post('guild/:guildId/initialize')
-  async initializeGuildBuffs(@Param('guildId') guildId: string): Promise<GuildBuff[]> {
+  async initializeGuildBuffs(
+    @Param('guildId') guildId: string,
+  ): Promise<GuildBuff[]> {
     return this.guildBuffService.initializeGuildBuffs(parseInt(guildId));
   }
 
@@ -63,7 +69,9 @@ export class GuildBuffController {
 
   // Reset guild buffs to default (Admin only)
   @Post('guild/:guildId/reset')
-  async resetGuildBuffs(@Param('guildId') guildId: string): Promise<GuildBuff[]> {
+  async resetGuildBuffs(
+    @Param('guildId') guildId: string,
+  ): Promise<GuildBuff[]> {
     return this.guildBuffService.resetGuildBuffsToDefault(parseInt(guildId));
   }
 
@@ -73,16 +81,22 @@ export class GuildBuffController {
     @Param('guildId') guildId: string,
     @Body() updates: Array<{ guildLevel: number } & UpdateGuildBuffDto>,
   ): Promise<GuildBuff[]> {
-    return this.guildBuffService.bulkUpdateGuildBuffs(parseInt(guildId), updates);
+    return this.guildBuffService.bulkUpdateGuildBuffs(
+      parseInt(guildId),
+      updates,
+    );
   }
 
   // Initialize buffs for all existing guilds (Admin only)
   @Post('admin/initialize-all')
-  async initializeAllGuildBuffs(): Promise<{ message: string; initialized: number }> {
+  async initializeAllGuildBuffs(): Promise<{
+    message: string;
+    initialized: number;
+  }> {
     const result = await this.guildBuffService.initializeAllExistingGuilds();
     return {
       message: 'Guild buffs initialized successfully',
-      initialized: result
+      initialized: result,
     };
   }
 
@@ -91,19 +105,19 @@ export class GuildBuffController {
   async debugGuildBuffsStatus(): Promise<any> {
     const allGuilds = await this.guildBuffService['guildRepository'].find();
     const allBuffs = await this.guildBuffService.getAllGuildBuffs();
-    
-    const status = allGuilds.map(guild => ({
+
+    const status = allGuilds.map((guild) => ({
       guildId: guild.id,
       guildName: guild.name,
       guildLevel: guild.level,
-      hasBuffs: allBuffs.filter(buff => buff.guildId === guild.id).length > 0,
-      buffCount: allBuffs.filter(buff => buff.guildId === guild.id).length
+      hasBuffs: allBuffs.filter((buff) => buff.guildId === guild.id).length > 0,
+      buffCount: allBuffs.filter((buff) => buff.guildId === guild.id).length,
     }));
 
     return {
       totalGuilds: allGuilds.length,
       totalBuffs: allBuffs.length,
-      guilds: status
+      guilds: status,
     };
   }
 }

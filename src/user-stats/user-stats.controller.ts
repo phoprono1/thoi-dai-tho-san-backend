@@ -49,14 +49,17 @@ export class UserStatsController {
 
   // Debug endpoint to check user stats with guild buffs
   @Get('debug/:userId/with-guild-buffs')
-  async debugUserStatsWithGuildBuffs(@Param('userId') userId: string): Promise<any> {
+  async debugUserStatsWithGuildBuffs(
+    @Param('userId') userId: string,
+  ): Promise<any> {
     const userStats = await this.userStatsService.findByUserId(+userId);
-    const totalStats = await this.userStatsService.getTotalStatsWithAllBonuses(+userId);
-    
+    const totalStats =
+      await this.userStatsService.getTotalStatsWithAllBonuses(+userId);
+
     return {
       baseStats: userStats,
       totalStatsWithAllBonuses: totalStats,
-      userId: +userId
+      userId: +userId,
     };
   }
 

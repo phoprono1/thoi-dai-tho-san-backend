@@ -10,13 +10,7 @@ import { UserStat } from '../user-stats/user-stat.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      CraftingRecipe,
-      Item,
-      UserItem,
-      User,
-      UserStat,
-    ]),
+    TypeOrmModule.forFeature([CraftingRecipe, Item, UserItem, User, UserStat]),
   ],
   controllers: [CraftingController],
   providers: [CraftingService],

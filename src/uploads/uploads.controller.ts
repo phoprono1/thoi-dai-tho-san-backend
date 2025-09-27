@@ -340,7 +340,12 @@ export class UploadsController {
       limits: { fileSize: MAX_FILE_BYTES },
       storage: diskStorage({
         destination: (req, file, cb) => {
-          cb(null, join(process.cwd(), 'assets', 'world-boss'));
+          const worldBossDir = join(process.cwd(), 'assets', 'world-boss');
+          // Ensure world-boss directory exists
+          if (!fs.existsSync(worldBossDir)) {
+            fs.mkdirSync(worldBossDir, { recursive: true });
+          }
+          cb(null, worldBossDir);
         },
         filename: (req, file, cb) => {
           const uniqueSuffix = randomUUID();
@@ -358,7 +363,7 @@ export class UploadsController {
     const rel = `/assets/world-boss/${file.filename}`;
     const originalPath = file.path;
     const thumbsDir = join(process.cwd(), 'assets', 'world-boss', 'thumbs');
-    
+
     // Ensure thumbs directory exists
     if (!fs.existsSync(thumbsDir)) {
       fs.mkdirSync(thumbsDir, { recursive: true });
@@ -386,7 +391,7 @@ export class UploadsController {
             sharpLib.format.heif &&
             sharpLib.format.heif.input),
       );
-      
+
       if (ext.endsWith('.avif') && !avifSupported) {
         console.warn(
           'AVIF upload detected but AVIF input not supported by sharp build',
@@ -398,22 +403,24 @@ export class UploadsController {
         };
       }
 
-      await sharpLib.default(originalPath)
+      await sharpLib
+        .default(originalPath)
         .resize(64, 64, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, smallName));
-      
-      await sharpLib.default(originalPath)
+
+      await sharpLib
+        .default(originalPath)
         .resize(256, 256, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, mediumName));
 
       const smallRel = `/assets/world-boss/thumbs/${smallName}`;
       const mediumRel = `/assets/world-boss/thumbs/${mediumName}`;
-      
-      return { 
-        path: rel, 
-        thumbnails: { small: smallRel, medium: mediumRel } 
+
+      return {
+        path: rel,
+        thumbnails: { small: smallRel, medium: mediumRel },
       };
     } catch (err) {
       console.warn('Thumbnail generation failed for world boss:', {

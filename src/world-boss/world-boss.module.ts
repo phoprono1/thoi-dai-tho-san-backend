@@ -33,7 +33,7 @@ import { Mailbox } from '../mailbox/mailbox.entity';
   ],
   controllers: [WorldBossController],
   providers: [
-    WorldBossService, 
+    WorldBossService,
     BossSchedulerService,
     BossTemplateService,
     WorldBossGateway,
@@ -46,6 +46,11 @@ import { Mailbox } from '../mailbox/mailbox.entity';
       inject: [WorldBossService, WorldBossGateway],
     },
   ],
-  exports: [WorldBossService, BossSchedulerService, BossTemplateService, WorldBossGateway],
+  exports: [
+    WorldBossService,
+    BossSchedulerService,
+    BossTemplateService,
+    WorldBossGateway,
+  ],
 })
 export class WorldBossModule {}

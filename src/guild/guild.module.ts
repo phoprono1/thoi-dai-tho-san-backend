@@ -24,12 +24,21 @@ if (process.env.NODE_ENV !== 'production') {
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Guild, GuildMember, GuildEvent, GuildBuff, GlobalGuildBuff, User]),
+    TypeOrmModule.forFeature([
+      Guild,
+      GuildMember,
+      GuildEvent,
+      GuildBuff,
+      GlobalGuildBuff,
+      User,
+    ]),
     CommonModule,
   ],
-  controllers: [GuildController, GuildBuffController, GlobalGuildBuffController].concat(
-    DebugGuildController ? [DebugGuildController] : [],
-  ),
+  controllers: [
+    GuildController,
+    GuildBuffController,
+    GlobalGuildBuffController,
+  ].concat(DebugGuildController ? [DebugGuildController] : []),
   providers: [GuildService, GuildBuffService, GlobalGuildBuffService],
   exports: [GuildService, GuildBuffService, GlobalGuildBuffService],
 })

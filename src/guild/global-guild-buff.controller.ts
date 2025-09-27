@@ -8,14 +8,19 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { GlobalGuildBuffService, UpdateGlobalGuildBuffDto } from './global-guild-buff.service';
+import {
+  GlobalGuildBuffService,
+  UpdateGlobalGuildBuffDto,
+} from './global-guild-buff.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GlobalGuildBuff } from './global-guild-buff.entity';
 
 @Controller('global-guild-buffs')
 @UseGuards(JwtAuthGuard)
 export class GlobalGuildBuffController {
-  constructor(private readonly globalGuildBuffService: GlobalGuildBuffService) {}
+  constructor(
+    private readonly globalGuildBuffService: GlobalGuildBuffService,
+  ) {}
 
   // Get all global guild buffs (Admin only)
   @Get('admin/all')
@@ -25,13 +30,17 @@ export class GlobalGuildBuffController {
 
   // Get buff for specific level
   @Get('level/:level')
-  async getBuffForLevel(@Param('level') level: string): Promise<GlobalGuildBuff | null> {
+  async getBuffForLevel(
+    @Param('level') level: string,
+  ): Promise<GlobalGuildBuff | null> {
     return this.globalGuildBuffService.getBuffForLevel(parseInt(level));
   }
 
   // Get current user's guild buffs
   @Get('my-buffs')
-  async getMyGuildBuffs(@Request() req: any): Promise<GlobalGuildBuff['statBuffs'] | null> {
+  async getMyGuildBuffs(
+    @Request() req: any,
+  ): Promise<GlobalGuildBuff['statBuffs'] | null> {
     return this.globalGuildBuffService.getUserGuildBuffs(req.user.id);
   }
 
@@ -41,26 +50,35 @@ export class GlobalGuildBuffController {
     @Param('level') level: string,
     @Body() updateData: UpdateGlobalGuildBuffDto,
   ): Promise<GlobalGuildBuff> {
-    return this.globalGuildBuffService.updateGlobalBuff(parseInt(level), updateData);
+    return this.globalGuildBuffService.updateGlobalBuff(
+      parseInt(level),
+      updateData,
+    );
   }
 
   // Initialize default global buffs (Admin only)
   @Post('admin/initialize')
-  async initializeGlobalBuffs(): Promise<{ message: string; buffs: GlobalGuildBuff[] }> {
+  async initializeGlobalBuffs(): Promise<{
+    message: string;
+    buffs: GlobalGuildBuff[];
+  }> {
     const buffs = await this.globalGuildBuffService.initializeGlobalBuffs();
     return {
       message: 'Global guild buffs initialized successfully',
-      buffs
+      buffs,
     };
   }
 
   // Reset all buffs to defaults (Admin only)
   @Post('admin/reset')
-  async resetToDefaults(): Promise<{ message: string; buffs: GlobalGuildBuff[] }> {
+  async resetToDefaults(): Promise<{
+    message: string;
+    buffs: GlobalGuildBuff[];
+  }> {
     const buffs = await this.globalGuildBuffService.resetToDefaults();
     return {
       message: 'Global guild buffs reset to defaults',
-      buffs
+      buffs,
     };
   }
 

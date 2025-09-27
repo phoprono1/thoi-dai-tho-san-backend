@@ -57,16 +57,18 @@ export class GuildBuffService {
     }
 
     return this.guildBuffRepository.findOne({
-      where: { 
-        guildId, 
+      where: {
+        guildId,
         guildLevel: guild.level,
-        isActive: true 
+        isActive: true,
       },
     });
   }
 
   // Get buff stats for a user's guild
-  async getUserGuildBuffs(userId: number): Promise<GuildBuff['statBuffs'] | null> {
+  async getUserGuildBuffs(
+    userId: number,
+  ): Promise<GuildBuff['statBuffs'] | null> {
     const guild = await this.guildRepository
       .createQueryBuilder('guild')
       .innerJoin('guild.members', 'member')
@@ -84,9 +86,9 @@ export class GuildBuffService {
 
   // Update a specific guild buff
   async updateGuildBuff(
-    guildId: number, 
-    guildLevel: number, 
-    updateData: UpdateGuildBuffDto
+    guildId: number,
+    guildLevel: number,
+    updateData: UpdateGuildBuffDto,
   ): Promise<GuildBuff> {
     const buff = await this.guildBuffRepository.findOne({
       where: { guildId, guildLevel },
@@ -149,24 +151,24 @@ export class GuildBuffService {
   async resetGuildBuffsToDefault(guildId: number): Promise<GuildBuff[]> {
     // Delete existing buffs
     await this.guildBuffRepository.delete({ guildId });
-    
+
     // Recreate with default values
     return this.initializeGuildBuffs(guildId);
   }
 
   // Bulk update multiple guild buffs
   async bulkUpdateGuildBuffs(
-    guildId: number, 
-    updates: Array<{ guildLevel: number } & UpdateGuildBuffDto>
+    guildId: number,
+    updates: Array<{ guildLevel: number } & UpdateGuildBuffDto>,
   ): Promise<GuildBuff[]> {
     const results: GuildBuff[] = [];
-    
+
     for (const update of updates) {
       const { guildLevel, ...updateData } = update;
       const buff = await this.updateGuildBuff(guildId, guildLevel, updateData);
       results.push(buff);
     }
-    
+
     return results;
   }
 

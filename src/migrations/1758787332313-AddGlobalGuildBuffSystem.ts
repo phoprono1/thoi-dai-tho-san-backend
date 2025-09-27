@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddGlobalGuildBuffSystem1758787332313 implements MigrationInterface {
+export class AddGlobalGuildBuffSystem1758787332313
+  implements MigrationInterface
+{
   name = 'AddGlobalGuildBuffSystem1758787332313';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

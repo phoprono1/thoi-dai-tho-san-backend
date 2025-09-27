@@ -489,7 +489,8 @@ export class UserStatsService {
 
     // 6. Guild buffs (only if user is in a guild)
     try {
-      const guildBuffs = await this.globalGuildBuffService.getUserGuildBuffs(userId);
+      const guildBuffs =
+        await this.globalGuildBuffService.getUserGuildBuffs(userId);
       if (guildBuffs) {
         totalStr += guildBuffs.strength || 0;
         totalInt += guildBuffs.intelligence || 0;

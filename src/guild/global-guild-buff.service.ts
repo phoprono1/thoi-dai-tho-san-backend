@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GlobalGuildBuff, DEFAULT_GLOBAL_GUILD_BUFFS } from './global-guild-buff.entity';
+import {
+  GlobalGuildBuff,
+  DEFAULT_GLOBAL_GUILD_BUFFS,
+} from './global-guild-buff.entity';
 import { Guild } from './guild.entity';
 
 export interface UpdateGlobalGuildBuffDto {
@@ -40,7 +43,9 @@ export class GlobalGuildBuffService {
   }
 
   // Get buff stats for a user's guild (based on guild level)
-  async getUserGuildBuffs(userId: number): Promise<GlobalGuildBuff['statBuffs'] | null> {
+  async getUserGuildBuffs(
+    userId: number,
+  ): Promise<GlobalGuildBuff['statBuffs'] | null> {
     const guild = await this.guildRepository
       .createQueryBuilder('guild')
       .innerJoin('guild.members', 'member')
@@ -58,15 +63,17 @@ export class GlobalGuildBuffService {
 
   // Update a specific level's buff (Admin only)
   async updateGlobalBuff(
-    guildLevel: number, 
-    updateData: UpdateGlobalGuildBuffDto
+    guildLevel: number,
+    updateData: UpdateGlobalGuildBuffDto,
   ): Promise<GlobalGuildBuff> {
     const buff = await this.globalGuildBuffRepository.findOne({
       where: { guildLevel },
     });
 
     if (!buff) {
-      throw new NotFoundException(`Global guild buff for level ${guildLevel} not found`);
+      throw new NotFoundException(
+        `Global guild buff for level ${guildLevel} not found`,
+      );
     }
 
     // Merge stat buffs if provided
@@ -113,23 +120,23 @@ export class GlobalGuildBuffService {
   async resetToDefaults(): Promise<GlobalGuildBuff[]> {
     // Delete existing buffs
     await this.globalGuildBuffRepository.clear();
-    
+
     // Recreate with default values
     return this.initializeGlobalBuffs();
   }
 
   // Bulk update multiple levels
   async bulkUpdateGlobalBuffs(
-    updates: Array<{ guildLevel: number } & UpdateGlobalGuildBuffDto>
+    updates: Array<{ guildLevel: number } & UpdateGlobalGuildBuffDto>,
   ): Promise<GlobalGuildBuff[]> {
     const results: GlobalGuildBuff[] = [];
-    
+
     for (const update of updates) {
       const { guildLevel, ...updateData } = update;
       const buff = await this.updateGlobalBuff(guildLevel, updateData);
       results.push(buff);
     }
-    
+
     return results;
   }
 
@@ -138,12 +145,15 @@ export class GlobalGuildBuffService {
     const buffs = await this.getAllGlobalBuffs();
     return {
       totalLevels: buffs.length,
-      buffs: buffs.map(buff => ({
+      buffs: buffs.map((buff) => ({
         level: buff.guildLevel,
-        totalStats: Object.values(buff.statBuffs).reduce((sum, val) => sum + val, 0),
+        totalStats: Object.values(buff.statBuffs).reduce(
+          (sum, val) => sum + val,
+          0,
+        ),
         isActive: buff.isActive,
-        description: buff.description
-      }))
+        description: buff.description,
+      })),
     };
   }
 }

@@ -251,7 +251,9 @@ export class WorldBossController {
   @Post('end-expired')
   async endExpiredBosses(): Promise<{ message: string }> {
     await this.worldBossService.endExpiredBosses();
-    return { message: 'Expired bosses have been ended and rewards distributed' };
+    return {
+      message: 'Expired bosses have been ended and rewards distributed',
+    };
   }
 
   // Admin endpoint to manually end a specific boss
@@ -262,5 +264,24 @@ export class WorldBossController {
       return { message: 'Boss has been ended and rewards distributed' };
     }
     return { message: 'Boss not found or already ended' };
+  }
+
+  // Admin endpoint to delete a boss (force delete without rewards)
+  @Delete(':id')
+  async deleteBoss(@Param('id') id: string): Promise<{ message: string }> {
+    const success = await this.worldBossService.deleteBoss(parseInt(id));
+    if (success) {
+      return { message: 'Boss has been deleted successfully' };
+    }
+    return { message: 'Boss not found' };
+  }
+
+  // Admin endpoint to update boss details
+  @Put(':id')
+  async updateBoss(
+    @Param('id') id: string,
+    @Body() updateData: Partial<CreateWorldBossDto>,
+  ): Promise<WorldBossResponseDto> {
+    return this.worldBossService.updateBoss(parseInt(id), updateData);
   }
 }

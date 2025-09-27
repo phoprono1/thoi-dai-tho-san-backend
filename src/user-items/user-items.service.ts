@@ -851,7 +851,9 @@ export class UserItemsService {
   ): Promise<{ success: boolean; message: string; effects: any }> {
     const userStats = await this.userStatsService.findByUserId(user.id);
     if (!userStats) {
-      throw new BadRequestException('Không tìm thấy thông tin chỉ số người chơi');
+      throw new BadRequestException(
+        'Không tìm thấy thông tin chỉ số người chơi',
+      );
     }
 
     const item = userItem.item;
@@ -861,7 +863,7 @@ export class UserItemsService {
 
     // Apply permanent stat increases
     const statBoosts: any = {};
-    
+
     if (item.stats.strength) {
       userStats.strength += item.stats.strength;
       statBoosts.strength = item.stats.strength;

@@ -68,7 +68,7 @@ export class WorldBossService {
 
   // Inject gateway after construction to avoid circular dependency
   private gateway: WorldBossGateway;
-  
+
   setGateway(gateway: WorldBossGateway) {
     this.gateway = gateway;
   }
@@ -150,7 +150,9 @@ export class WorldBossService {
 
     // Check if boss is still within active time
     if (boss.endTime && new Date() > new Date(boss.endTime)) {
-      throw new BadRequestException('Boss event has ended. Combat is no longer available.');
+      throw new BadRequestException(
+        'Boss event has ended. Combat is no longer available.',
+      );
     }
 
     // Check cooldown
@@ -196,6 +198,14 @@ export class WorldBossService {
 
     // Check if boss phase should advance
     await this.checkPhaseAdvancement(boss.id, combatResult.totalDamage);
+
+    // Broadcast updated boss status to all clients
+    if (this.gateway) {
+      const updatedBoss = await this.getCurrentBoss();
+      if (updatedBoss) {
+        this.gateway.broadcastBossUpdate(updatedBoss);
+      }
+    }
 
     return {
       success: true,
@@ -334,7 +344,8 @@ export class WorldBossService {
     });
 
     if (existingRanking) {
-      existingRanking.totalDamage = Number(existingRanking.totalDamage) + Number(damage);
+      existingRanking.totalDamage =
+        Number(existingRanking.totalDamage) + Number(damage);
       existingRanking.attackCount = Number(existingRanking.attackCount) + 1;
       existingRanking.lastDamage = Number(damage);
       await this.bossDamageRankingRepository.save(existingRanking);
@@ -368,8 +379,10 @@ export class WorldBossService {
         });
 
       if (existingGuildRanking) {
-        existingGuildRanking.totalDamage = Number(existingGuildRanking.totalDamage) + Number(damage);
-        existingGuildRanking.attackCount = Number(existingGuildRanking.attackCount) + 1;
+        existingGuildRanking.totalDamage =
+          Number(existingGuildRanking.totalDamage) + Number(damage);
+        existingGuildRanking.attackCount =
+          Number(existingGuildRanking.attackCount) + 1;
         existingGuildRanking.lastDamage = Number(damage);
         await this.bossDamageRankingRepository.save(existingGuildRanking);
       } else {
@@ -613,15 +626,12 @@ export class WorldBossService {
 
   private startBossTimer(bossId: number) {
     // Get boss duration from database
-    this.worldBossRepository.findOne({ where: { id: bossId } }).then(boss => {
+    this.worldBossRepository.findOne({ where: { id: bossId } }).then((boss) => {
       if (boss && boss.durationMinutes) {
         const durationMs = boss.durationMinutes * 60 * 1000;
-        const timer = setTimeout(
-          async () => {
-            await this.handleBossTimeout(bossId);
-          },
-          durationMs,
-        );
+        const timer = setTimeout(async () => {
+          await this.handleBossTimeout(bossId);
+        }, durationMs);
         this.bossTimers.set(bossId, timer);
       }
     });
@@ -640,13 +650,17 @@ export class WorldBossService {
   }
 
   // New methods for template-based boss creation
-  async createBossFromTemplate(dto: CreateBossFromTemplateDto): Promise<WorldBossResponseDto> {
+  async createBossFromTemplate(
+    dto: CreateBossFromTemplateDto,
+  ): Promise<WorldBossResponseDto> {
     const template = await this.bossTemplateRepository.findOne({
       where: { id: dto.templateId },
     });
 
     if (!template) {
-      throw new NotFoundException(`Boss template with ID ${dto.templateId} not found`);
+      throw new NotFoundException(
+        `Boss template with ID ${dto.templateId} not found`,
+      );
     }
 
     // Validate schedule if provided
@@ -655,7 +669,9 @@ export class WorldBossService {
         where: { id: dto.scheduleId },
       });
       if (!schedule) {
-        throw new NotFoundException(`Schedule with ID ${dto.scheduleId} not found`);
+        throw new NotFoundException(
+          `Schedule with ID ${dto.scheduleId} not found`,
+        );
       }
     }
 
@@ -705,7 +721,9 @@ export class WorldBossService {
     return this.mapToResponseDto(savedBoss);
   }
 
-  async assignBossToSchedule(dto: AssignBossToScheduleDto): Promise<WorldBossResponseDto> {
+  async assignBossToSchedule(
+    dto: AssignBossToScheduleDto,
+  ): Promise<WorldBossResponseDto> {
     const boss = await this.worldBossRepository.findOne({
       where: { id: dto.bossId },
     });
@@ -719,7 +737,9 @@ export class WorldBossService {
     });
 
     if (!schedule) {
-      throw new NotFoundException(`Schedule with ID ${dto.scheduleId} not found`);
+      throw new NotFoundException(
+        `Schedule with ID ${dto.scheduleId} not found`,
+      );
     }
 
     boss.scheduleId = dto.scheduleId;
@@ -728,7 +748,9 @@ export class WorldBossService {
     return this.mapToResponseDto(updatedBoss);
   }
 
-  async removeBossFromSchedule(dto: RemoveBossFromScheduleDto): Promise<WorldBossResponseDto> {
+  async removeBossFromSchedule(
+    dto: RemoveBossFromScheduleDto,
+  ): Promise<WorldBossResponseDto> {
     const boss = await this.worldBossRepository.findOne({
       where: { id: dto.bossId },
     });
@@ -743,7 +765,10 @@ export class WorldBossService {
     return this.mapToResponseDto(updatedBoss);
   }
 
-  async updateBossRewards(bossId: number, customRewards: any): Promise<WorldBossResponseDto> {
+  async updateBossRewards(
+    bossId: number,
+    customRewards: any,
+  ): Promise<WorldBossResponseDto> {
     const boss = await this.worldBossRepository.findOne({
       where: { id: bossId },
     });
@@ -765,7 +790,7 @@ export class WorldBossService {
       order: { createdAt: 'DESC' },
     });
 
-    return bosses.map(boss => ({
+    return bosses.map((boss) => ({
       ...this.mapToResponseDto(boss),
       template: boss.template,
       schedule: boss.schedule,
@@ -824,5 +849,70 @@ export class WorldBossService {
       createdAt: boss.createdAt,
       updatedAt: boss.updatedAt,
     };
+  }
+
+  async deleteBoss(bossId: number): Promise<boolean> {
+    try {
+      const boss = await this.worldBossRepository.findOne({
+        where: { id: bossId },
+      });
+
+      if (!boss) {
+        return false;
+      }
+
+      // Delete related data first
+      await this.bossCombatLogRepository.delete({ bossId });
+      await this.bossDamageRankingRepository.delete({ bossId });
+      await this.bossCombatCooldownRepository.delete({ bossId });
+
+      // Delete the boss
+      await this.worldBossRepository.delete({ id: bossId });
+
+      this.logger.log(`Boss ${bossId} deleted successfully`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to delete boss ${bossId}:`, error);
+      return false;
+    }
+  }
+
+  async updateBoss(
+    bossId: number,
+    updateData: Partial<CreateWorldBossDto>,
+  ): Promise<WorldBossResponseDto> {
+    const boss = await this.worldBossRepository.findOne({
+      where: { id: bossId },
+    });
+
+    if (!boss) {
+      throw new NotFoundException('Boss not found');
+    }
+
+    // Update boss properties
+    if (updateData.name) boss.name = updateData.name;
+    if (updateData.description) boss.description = updateData.description;
+    if (updateData.level) boss.level = updateData.level;
+    if (updateData.maxHp) boss.maxHp = updateData.maxHp;
+    if (updateData.stats) boss.stats = updateData.stats;
+    if (updateData.durationMinutes) boss.durationMinutes = updateData.durationMinutes;
+    if (updateData.image) boss.image = updateData.image;
+
+    // Update end time if duration changed
+    if (updateData.durationMinutes && boss.scheduledStartTime) {
+      const endTime = new Date(boss.scheduledStartTime);
+      endTime.setMinutes(endTime.getMinutes() + updateData.durationMinutes);
+      boss.endTime = endTime;
+    }
+
+    const updatedBoss = await this.worldBossRepository.save(boss);
+
+    // Broadcast update to all clients
+    if (this.gateway) {
+      const bossDto = this.mapToResponseDto(updatedBoss);
+      this.gateway.broadcastBossUpdate(bossDto);
+    }
+
+    return this.mapToResponseDto(updatedBoss);
   }
 }

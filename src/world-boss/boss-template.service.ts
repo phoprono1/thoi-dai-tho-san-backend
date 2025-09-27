@@ -2,7 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BossTemplate } from './boss-template.entity';
-import { CreateBossTemplateDto, UpdateBossTemplateDto, BossTemplateResponseDto } from './world-boss.dto';
+import {
+  CreateBossTemplateDto,
+  UpdateBossTemplateDto,
+  BossTemplateResponseDto,
+} from './world-boss.dto';
 
 @Injectable()
 export class BossTemplateService {
@@ -11,7 +15,9 @@ export class BossTemplateService {
     private bossTemplateRepository: Repository<BossTemplate>,
   ) {}
 
-  async createTemplate(dto: CreateBossTemplateDto): Promise<BossTemplateResponseDto> {
+  async createTemplate(
+    dto: CreateBossTemplateDto,
+  ): Promise<BossTemplateResponseDto> {
     const template = this.bossTemplateRepository.create(dto);
     const savedTemplate = await this.bossTemplateRepository.save(template);
     return this.mapToResponseDto(savedTemplate);
@@ -21,7 +27,7 @@ export class BossTemplateService {
     const templates = await this.bossTemplateRepository.find({
       order: { createdAt: 'DESC' },
     });
-    return templates.map(template => this.mapToResponseDto(template));
+    return templates.map((template) => this.mapToResponseDto(template));
   }
 
   async getActiveTemplates(): Promise<BossTemplateResponseDto[]> {
@@ -29,7 +35,7 @@ export class BossTemplateService {
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
-    return templates.map(template => this.mapToResponseDto(template));
+    return templates.map((template) => this.mapToResponseDto(template));
   }
 
   async getTemplateById(id: number): Promise<BossTemplateResponseDto> {
@@ -44,7 +50,10 @@ export class BossTemplateService {
     return this.mapToResponseDto(template);
   }
 
-  async updateTemplate(id: number, dto: UpdateBossTemplateDto): Promise<BossTemplateResponseDto> {
+  async updateTemplate(
+    id: number,
+    dto: UpdateBossTemplateDto,
+  ): Promise<BossTemplateResponseDto> {
     const template = await this.bossTemplateRepository.findOne({
       where: { id },
     });
@@ -65,12 +74,14 @@ export class BossTemplateService {
     }
   }
 
-  async getTemplatesByCategory(category: string): Promise<BossTemplateResponseDto[]> {
+  async getTemplatesByCategory(
+    category: string,
+  ): Promise<BossTemplateResponseDto[]> {
     const templates = await this.bossTemplateRepository.find({
       where: { category, isActive: true },
       order: { createdAt: 'DESC' },
     });
-    return templates.map(template => this.mapToResponseDto(template));
+    return templates.map((template) => this.mapToResponseDto(template));
   }
 
   private mapToResponseDto(template: BossTemplate): BossTemplateResponseDto {
