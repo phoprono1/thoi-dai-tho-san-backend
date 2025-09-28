@@ -10,6 +10,7 @@ import { User } from '../users/user.entity';
 import { UserItemsModule } from '../user-items/user-items.module';
 import { ItemsModule } from '../items/items.module';
 import { GuildModule } from '../guild/guild.module';
+import { TitlesModule } from '../titles/titles.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { GuildModule } from '../guild/guild.module';
     forwardRef(() => UserItemsModule),
     ItemsModule,
     forwardRef(() => GuildModule),
+    forwardRef(() => TitlesModule),
   ],
   providers: [UserStatsService],
   controllers: [UserStatsController],

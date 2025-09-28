@@ -9,6 +9,7 @@ import { ItemSetsService } from '../items/item-sets.service';
 import { GlobalGuildBuffService } from '../guild/global-guild-buff.service';
 import { SetBonusType } from '../items/item-set.entity';
 import { User } from '../users/user.entity';
+import { TitlesService } from '../titles/titles.service';
 
 @Injectable()
 export class UserStatsService {
@@ -22,6 +23,8 @@ export class UserStatsService {
     private readonly itemSetsService: ItemSetsService,
     @Inject(forwardRef(() => GlobalGuildBuffService))
     private readonly globalGuildBuffService: GlobalGuildBuffService,
+    @Inject(forwardRef(() => TitlesService))
+    private readonly titlesService: TitlesService,
     @InjectRepository(User)
     private usersRepository: Repository<User>,
   ) {}
@@ -500,6 +503,20 @@ export class UserStatsService {
       }
     } catch (error) {
       console.warn('Failed to get guild buffs:', error);
+    }
+
+    // 7. Title bonuses (only if user has equipped title)
+    try {
+      const titleStats = await this.titlesService.getTitleStats(userId);
+      if (titleStats) {
+        totalStr += titleStats.strength || 0;
+        totalInt += titleStats.intelligence || 0;
+        totalDex += titleStats.dexterity || 0;
+        totalVit += titleStats.vitality || 0;
+        totalLuk += titleStats.luck || 0;
+      }
+    } catch (error) {
+      console.warn('Failed to get title stats:', error);
     }
 
     return {

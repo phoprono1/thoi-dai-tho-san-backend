@@ -11,6 +11,7 @@ import { ChatMessage, ChatType } from './chat-message.entity';
 import { User } from '../users/user.entity';
 import { SendMessageDto, ChatMessageResponseDto } from './chat.dto';
 import { GuildMember } from '../guild/guild.entity';
+import { UserTitle } from '../titles/user-title.entity';
 
 @Injectable()
 export class ChatService {
@@ -21,7 +22,26 @@ export class ChatService {
     private userRepository: Repository<User>,
     @InjectRepository(GuildMember)
     private guildMemberRepository?: Repository<any>,
+    @InjectRepository(UserTitle)
+    private userTitleRepository?: Repository<UserTitle>,
   ) {}
+
+  private async getUserEquippedTitle(userId: number) {
+    if (!this.userTitleRepository) return null;
+    
+    const equippedTitle = await this.userTitleRepository.findOne({
+      where: { userId, isEquipped: true },
+      relations: ['title'],
+    });
+
+    if (!equippedTitle?.title) return null;
+
+    return {
+      name: equippedTitle.title.name,
+      prefix: equippedTitle.title.displayEffects?.prefix,
+      displayEffects: equippedTitle.title.displayEffects,
+    };
+  }
 
   async sendMessage(
     userId: number,
@@ -59,6 +79,7 @@ export class ChatService {
     });
 
     const savedMessage = await this.chatMessageRepository.save(message);
+    const userTitle = await this.getUserEquippedTitle(userId);
 
     return {
       id: savedMessage.id,
@@ -68,6 +89,7 @@ export class ChatService {
       type: savedMessage.type,
       guildId: savedMessage.guildId,
       createdAt: savedMessage.createdAt,
+      userTitle,
     };
   }
 
@@ -81,14 +103,22 @@ export class ChatService {
       take: limit,
     });
 
-    return messages.reverse().map((msg) => ({
-      id: msg.id,
-      userId: msg.userId,
-      username: msg.user.username,
-      message: msg.message,
-      type: msg.type,
-      createdAt: msg.createdAt,
-    }));
+    const messagesWithTitles = await Promise.all(
+      messages.reverse().map(async (msg) => {
+        const userTitle = await this.getUserEquippedTitle(msg.userId);
+        return {
+          id: msg.id,
+          userId: msg.userId,
+          username: msg.user.username,
+          message: msg.message,
+          type: msg.type,
+          createdAt: msg.createdAt,
+          userTitle,
+        };
+      })
+    );
+
+    return messagesWithTitles;
   }
 
   async getGuildMessages(
@@ -102,15 +132,23 @@ export class ChatService {
       take: limit,
     });
 
-    return messages.reverse().map((msg) => ({
-      id: msg.id,
-      userId: msg.userId,
-      username: msg.user.username,
-      message: msg.message,
-      type: msg.type,
-      guildId: msg.guildId,
-      createdAt: msg.createdAt,
-    }));
+    const messagesWithTitles = await Promise.all(
+      messages.reverse().map(async (msg) => {
+        const userTitle = await this.getUserEquippedTitle(msg.userId);
+        return {
+          id: msg.id,
+          userId: msg.userId,
+          username: msg.user.username,
+          message: msg.message,
+          type: msg.type,
+          guildId: msg.guildId,
+          createdAt: msg.createdAt,
+          userTitle,
+        };
+      })
+    );
+
+    return messagesWithTitles;
   }
 
   async deleteMessage(messageId: number, userId: number): Promise<void> {

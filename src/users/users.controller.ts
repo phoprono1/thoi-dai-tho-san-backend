@@ -25,6 +25,7 @@ import { UserStatsService } from '../user-stats/user-stats.service';
 // ...existing imports above include UseGuards and Request
 import * as bcrypt from 'bcrypt';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/admin.guard';
 
 @ApiTags('users')
 @Controller('users')
@@ -285,5 +286,17 @@ export class UsersController {
   })
   async levelUpUser(@Param('id') id: string): Promise<User> {
     return this.usersService.levelUpUser(+id);
+  }
+
+  // Admin endpoints
+  @Get('admin/search')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @ApiOperation({ summary: 'Admin: Tìm kiếm users theo username' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách users tìm được',
+  })
+  async searchUsers(@Query('q') query: string): Promise<Partial<User>[]> {
+    return this.usersService.searchUsers(query);
   }
 }

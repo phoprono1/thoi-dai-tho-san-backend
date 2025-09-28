@@ -385,4 +385,21 @@ export class UsersService {
 
     return user;
   }
+
+  // Search users by username for admin
+  async searchUsers(query: string): Promise<Partial<User>[]> {
+    if (!query || query.length < 2) {
+      return [];
+    }
+
+    const users = await this.usersRepository
+      .createQueryBuilder('user')
+      .select(['user.id', 'user.username', 'user.level', 'user.characterClass'])
+      .where('user.username ILIKE :query', { query: `%${query}%` })
+      .orderBy('user.username', 'ASC')
+      .limit(10)
+      .getMany();
+
+    return users;
+  }
 }

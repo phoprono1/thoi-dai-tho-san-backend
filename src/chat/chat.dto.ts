@@ -28,4 +28,15 @@ export class ChatMessageResponseDto {
   type: ChatType;
   guildId?: number;
   createdAt: Date;
+  userTitle?: {
+    name: string;
+    prefix?: string;
+    displayEffects?: {
+      color?: string;
+      backgroundColor?: string;
+      borderColor?: string;
+      glow?: boolean;
+      animation?: string;
+    };
+  };
 }
