@@ -1038,4 +1038,39 @@ export class GuildService {
       await queryRunner.release();
     }
   }
+
+  // Admin: Reset guild level
+  async resetGuildLevel(guildId: number, newLevel: number, newExperience: number = 0): Promise<Guild> {
+    const guild = await this.guildRepository.findOne({
+      where: { id: guildId },
+      relations: ['members', 'members.user'],
+    });
+
+    if (!guild) {
+      throw new NotFoundException('Guild not found');
+    }
+
+    if (newLevel < 1 || newLevel > 20) {
+      throw new BadRequestException('Guild level must be between 1 and 20');
+    }
+
+    // Update guild level and experience
+    guild.level = newLevel;
+    guild.experience = newExperience;
+
+    const updatedGuild = await this.guildRepository.save(guild);
+
+    // Log the admin action
+    this.logger.log(`Admin reset guild ${guild.name} (ID: ${guildId}) to level ${newLevel} with ${newExperience} experience`);
+
+    return updatedGuild;
+  }
+
+  // Admin: Get all guilds
+  async getAllGuilds(): Promise<Guild[]> {
+    return this.guildRepository.find({
+      relations: ['members', 'members.user'],
+      order: { level: 'DESC', experience: 'DESC' },
+    });
+  }
 }

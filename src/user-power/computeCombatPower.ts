@@ -32,20 +32,23 @@ export function computeCombatPowerFromStats(
   opts: ComputeOptions = {},
 ): number {
   const p = opts.exponent ?? 0.94;
+  
+  // Updated coefficients to match stat-converter.ts
   const coeffs = {
-    atkFromSTR: 0.45,
-    atkFromINT: 0.6,
-    atkFromDEX: 0.18,
-    hpFromVIT: 12,
-    defFromVIT: 0.5,
+    atkFromSTR: 0.45,     // stat-converter: atk_from_STR = 0.45
+    atkFromINT: 0.6,      // stat-converter: atk_from_INT = 0.6
+    atkFromDEX: 0.18,     // stat-converter: atk_from_DEX = 0.18
+    hpFromVIT: 12,        // stat-converter: hp_from_VIT = 12
+    defFromVIT: 0.5,      // stat-converter: def_from_VIT = 0.5
+    defFromDEX: 0.0,      // DEX doesn't contribute to defense in stat-converter
     ...(opts.coeffs || {}),
   };
 
   const weights = {
-    attack: 1,
-    hp: 0.08,
-    defense: 2.5,
-    misc: 0.5,
+    attack: 1.0,
+    hp: 0.1,              // Slightly higher weight for HP
+    defense: 1.5,         // Lower weight for defense to balance
+    misc: 0.8,            // Higher weight for crit/luck
     ...(opts.weights || {}),
   };
 
@@ -125,7 +128,7 @@ export function computeCombatPowerFromStats(
         equipAttackFlat +
         coeffs.atkFromSTR * eff(STR) +
         coeffs.atkFromINT * eff(INT) +
-        coeffs.atkFromDEX * eff(DEX),
+        coeffs.atkFromDEX * eff(DEX), // All three contribute to attack
     ) *
     (1 + equipAttackMult);
 
@@ -134,11 +137,11 @@ export function computeCombatPowerFromStats(
     (1 + equipHpMult);
 
   const finalDefense = Math.floor(
-    baseDefense + equipDefFlat + coeffs.defFromVIT * eff(VIT),
+    baseDefense + equipDefFlat + coeffs.defFromVIT * eff(VIT), // VIT contributes to defense
   );
 
-  // Simple misc score from LUK (crit) and DEX (accuracy/dodge)
-  const misc = LUK * 0.5 + DEX * 0.3;
+  // Misc score from LUK (crit rate), INT (mana/crit damage), and DEX (dodge/combo)
+  const misc = LUK * 1.0 + INT * 0.5 + DEX * 0.3;
 
   const power =
     weights.attack * finalAttack +

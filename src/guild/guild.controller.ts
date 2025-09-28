@@ -25,6 +25,7 @@ import { CreateGuildDto } from './dto/create-guild.dto';
 import { ContributeDto } from './dto/contribute.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateGuildWarDto } from './dto/create-guild-war.dto';
+import { AdminGuard } from '../auth/admin.guard';
 
 @ApiTags('Công hội - Guild')
 @ApiBearerAuth()
@@ -273,5 +274,33 @@ export class GuildController {
     @Param('guildId') guildId: number,
   ): Promise<GuildEvent[]> {
     return await this.guildService.getGuildEvents(guildId);
+  }
+
+  // Admin endpoints
+  @Put('admin/:guildId/level')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Admin: Reset guild level' })
+  @ApiResponse({
+    status: 200,
+    description: 'Guild level đã được reset',
+    type: Guild,
+  })
+  async resetGuildLevel(
+    @Param('guildId') guildId: number,
+    @Body() body: { level: number; experience?: number },
+  ): Promise<Guild> {
+    return await this.guildService.resetGuildLevel(guildId, body.level, body.experience || 0);
+  }
+
+  @Get('admin/all')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Admin: Lấy tất cả guilds' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách tất cả guilds',
+    type: [Guild],
+  })
+  async getAllGuilds(): Promise<Guild[]> {
+    return await this.guildService.getAllGuilds();
   }
 }
