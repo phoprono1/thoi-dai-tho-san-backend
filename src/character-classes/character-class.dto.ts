@@ -30,20 +30,12 @@ export class CreateCharacterClassDto {
 
   @IsObject()
   statBonuses: {
+    // Core stats
     strength?: number;
     intelligence?: number;
     dexterity?: number;
     vitality?: number;
     luck?: number;
-    // Advanced stats
-    critRate?: number;
-    critDamage?: number;
-    comboRate?: number;
-    counterRate?: number;
-    lifesteal?: number;
-    armorPen?: number;
-    dodgeRate?: number;
-    accuracy?: number;
   };
 
   @IsArray()

@@ -16,13 +16,13 @@ import { MailboxModule } from '../mailbox/mailbox.module';
   imports: [
     TypeOrmModule.forFeature([
       // Old PvP entities (keep for backward compatibility)
-      PvpMatch, 
-      PvpPlayer, 
+      PvpMatch,
+      PvpPlayer,
       // New PvP ranking entities
       PvpRanking,
       PvpSeason,
       PvpMatchNew,
-      User
+      User,
     ]),
     CombatResultsModule,
     UserStatsModule,

@@ -16,6 +16,8 @@ import {
   AdvancementStatus,
 } from './character-class.entity';
 import { CharacterAdvancement } from './character-class.entity';
+import { CharacterClassAdvancement } from './character-class-advancement.entity';
+import { PendingAdvancement } from './pending-advancement.entity';
 import { User } from '../users/user.entity';
 import { UserStat } from '../user-stats/user-stat.entity';
 import {
@@ -25,6 +27,7 @@ import {
 import { UserItem } from '../user-items/user-item.entity';
 import { QuestService } from '../quests/quest.service';
 import { UserStatsService } from '../user-stats/user-stats.service';
+import { CharacterClassHistory } from './character-class-history.entity';
 import {
   CreateCharacterClassDto,
   CharacterClassResponseDto,
@@ -42,6 +45,8 @@ export class CharacterClassService {
     private characterClassRepository: Repository<CharacterClass>,
     @InjectRepository(CharacterAdvancement)
     private characterAdvancementRepository: Repository<CharacterAdvancement>,
+    @InjectRepository(CharacterClassAdvancement)
+    private characterClassAdvancementRepository: Repository<CharacterClassAdvancement>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @InjectRepository(UserStat)
@@ -50,9 +55,13 @@ export class CharacterClassService {
     private combatResultRepository: Repository<CombatResult>,
     @InjectRepository(UserItem)
     private userItemRepository: Repository<UserItem>,
+    @InjectRepository(CharacterClassHistory)
+    private characterClassHistoryRepository: Repository<CharacterClassHistory>,
+    @InjectRepository(PendingAdvancement)
+    private pendingAdvancementRepository: Repository<PendingAdvancement>,
+    private dataSource: DataSource,
     private questService: QuestService,
     private userStatsService: UserStatsService,
-    private dataSource: DataSource,
   ) {}
 
   // Optional UserPowerService will be injected by the module when available
@@ -107,7 +116,7 @@ export class CharacterClassService {
     }
 
     const currentTier = user.characterClass?.tier ?? ClassTier.BASIC;
-    if (currentTier >= ClassTier.LEGENDARY) {
+    if (currentTier >= ClassTier.GODLIKE) {
       return {
         canAdvance: false,
         missingRequirements: {},
@@ -165,12 +174,155 @@ export class CharacterClassService {
       throw new NotFoundException('Target class not found');
     }
 
-    const user = await this.userRepository.findOne({ where: { id: userId } });
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['characterClass'],
+    });
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
     const missingRequirements: Record<string, unknown> = {};
+
+    console.log(
+      `Checking advancement requirements for userId=${userId}, targetClassId=${targetClassId}`,
+    );
+
+    // ✅ NEW: Check advancement path requirements
+    const advancementPath =
+      await this.characterClassAdvancementRepository.findOne({
+        where: {
+          fromClassId: user.characterClass?.id || null,
+          toClassId: targetClassId,
+        },
+      });
+
+    if (!advancementPath) {
+      throw new BadRequestException(
+        `No advancement path found from class ${user.characterClass?.id || 'none'} to class ${targetClassId}`,
+      );
+    }
+
+    console.log(`Advancement path found:`, {
+      id: advancementPath.id,
+      fromClassId: advancementPath.fromClassId,
+      toClassId: advancementPath.toClassId,
+      requirements: JSON.stringify(advancementPath.requirements, null, 2),
+    });
+
+    // Check advancement path level requirement
+    if (user.level < advancementPath.levelRequired) {
+      missingRequirements.level = advancementPath.levelRequired;
+    }
+
+    // Check advancement path specific requirements
+    if (advancementPath.requirements) {
+      // Check items requirement
+      if (advancementPath.requirements.items) {
+        const missingItems: any[] = [];
+        for (const itemReq of advancementPath.requirements.items) {
+          const userItems = await this.userItemRepository.find({
+            where: { userId, itemId: itemReq.itemId },
+          });
+          const totalQuantity = userItems.reduce(
+            (sum, item) => sum + item.quantity,
+            0,
+          );
+          console.log(
+            `Item check: userId=${userId}, itemId=${itemReq.itemId}, itemName=${itemReq.itemName}, required=${itemReq.quantity}, current=${totalQuantity}`,
+          );
+          if (totalQuantity < itemReq.quantity) {
+            missingItems.push({
+              itemId: itemReq.itemId,
+              itemName: itemReq.itemName,
+              required: itemReq.quantity,
+              current: totalQuantity,
+            });
+          }
+        }
+        if (missingItems.length > 0) {
+          missingRequirements.items = missingItems;
+        }
+      }
+
+      // Check quests requirement
+      if (advancementPath.requirements.quests) {
+        const missingQuests: any[] = [];
+        for (const questReq of advancementPath.requirements.quests) {
+          // Check if quest is completed using QuestService
+          const isCompleted = await this.questService.isQuestCompleted(
+            userId,
+            questReq.questId,
+          );
+          console.log(
+            `Quest check: userId=${userId}, questId=${questReq.questId}, questName=${questReq.questName}, isCompleted=${isCompleted}`,
+          );
+          if (!isCompleted) {
+            missingQuests.push({
+              questId: questReq.questId,
+              questName: questReq.questName,
+              status: 'not_completed',
+            });
+          }
+        }
+        if (missingQuests.length > 0) {
+          missingRequirements.quests = missingQuests;
+        }
+      }
+
+      // Check dungeons requirement
+      if (advancementPath.requirements.dungeons) {
+        const missingDungeons: any[] = [];
+        for (const dungeonReq of advancementPath.requirements.dungeons) {
+          const userDungeonResults = await this.combatResultRepository.find({
+            where: {
+              dungeonId: dungeonReq.dungeonId,
+              result: CombatResultType.VICTORY,
+            },
+          });
+
+          const userCompletions = userDungeonResults.filter(
+            (result) => result.userIds && result.userIds.includes(userId),
+          ).length;
+
+          console.log(
+            `Dungeon check: userId=${userId}, dungeonId=${dungeonReq.dungeonId}, dungeonName=${dungeonReq.dungeonName}, required=${dungeonReq.requiredCompletions}, current=${userCompletions}`,
+          );
+          if (userCompletions < dungeonReq.requiredCompletions) {
+            missingDungeons.push({
+              dungeonId: dungeonReq.dungeonId,
+              dungeonName: dungeonReq.dungeonName,
+              required: dungeonReq.requiredCompletions,
+              current: userCompletions,
+            });
+          }
+        }
+        if (missingDungeons.length > 0) {
+          missingRequirements.dungeons = missingDungeons;
+        }
+      }
+
+      // Check stats requirement
+      if (advancementPath.requirements.stats?.minTotalStats) {
+        const userStats = await this.userStatRepository.findOne({
+          where: { userId },
+        });
+        if (userStats) {
+          const totalStats =
+            userStats.strength +
+            userStats.intelligence +
+            userStats.dexterity +
+            userStats.vitality +
+            userStats.luck;
+          if (totalStats < advancementPath.requirements.stats.minTotalStats) {
+            missingRequirements.stats = {
+              required: advancementPath.requirements.stats.minTotalStats,
+              current: totalStats,
+            };
+          }
+        }
+      }
+    }
 
     // Check level requirement
     if (user.level < targetClass.requiredLevel) {
@@ -308,10 +460,10 @@ export class CharacterClassService {
       );
 
       if (!checkResult.canAdvance) {
-        throw new BadRequestException(
-          'Advancement requirements not met',
-          checkResult.missingRequirements,
-        );
+        throw new BadRequestException({
+          message: 'Advancement requirements not met',
+          missingRequirements: checkResult.missingRequirements,
+        });
       }
 
       // Consume required items
@@ -526,13 +678,300 @@ export class CharacterClassService {
       `Awaken chosen for user ${userId}: ${chosen.id}:${chosen.name} (idx ${idx}/${tierOneClasses.length})`,
     );
 
-    // Build a PerformAdvancementDto and reuse existing performAdvancement for transactional behavior
+    // Build a PerformAdvancementDto and use special awaken advancement (bypass path check)
     const dto: PerformAdvancementDto = {
       userId,
       targetClassId: chosen.id,
     } as PerformAdvancementDto;
 
-    return this.performAdvancement(dto);
+    return this.performAwakenAdvancement(dto);
+  }
+
+  /**
+   * Special advancement method for awaken (first class selection)
+   * Bypasses advancement path requirements since awaken is random selection from tier 1
+   */
+  async performAwakenAdvancement(
+    dto: PerformAdvancementDto,
+  ): Promise<AdvancementResultDto> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: dto.userId },
+        relations: ['characterClass'],
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // ✅ For awaken: User should NOT have a class
+      if (user.characterClass) {
+        throw new BadRequestException('User already has a class');
+      }
+
+      const userStats = await queryRunner.manager.findOne(UserStat, {
+        where: { userId: dto.userId },
+      });
+
+      if (!userStats) {
+        throw new NotFoundException('User stats not found');
+      }
+
+      const targetClass = await queryRunner.manager.findOne(CharacterClass, {
+        where: { id: dto.targetClassId },
+      });
+
+      if (!targetClass) {
+        throw new NotFoundException('Target class not found');
+      }
+
+      // ✅ For awaken: Only check basic requirements (level, tier 1)
+      if (targetClass.tier !== ClassTier.BASIC) {
+        throw new BadRequestException('Awaken can only select Tier 1 classes');
+      }
+
+      if (user.level < targetClass.requiredLevel) {
+        throw new BadRequestException(
+          `User level ${user.level} is below required level ${targetClass.requiredLevel}`,
+        );
+      }
+
+      // Set user's character class
+      user.characterClass = targetClass;
+      await queryRunner.manager.save(user);
+
+      // Record class history
+      const classHistory = queryRunner.manager.create(CharacterClassHistory, {
+        characterId: dto.userId,
+        previousClassId: null, // First class
+        newClassId: dto.targetClassId,
+        reason: 'awakening',
+        triggeredByUserId: dto.userId,
+      });
+      await queryRunner.manager.save(classHistory);
+
+      // Create advancement record
+      const advancement = queryRunner.manager.create(CharacterAdvancement, {
+        userId: dto.userId,
+        currentClassId: dto.targetClassId,
+        advancementStatus: AdvancementStatus.COMPLETED,
+        advancementDate: new Date(),
+        completedRequirements: {
+          dungeons: [],
+          quests: [],
+          items: [],
+        },
+      });
+
+      await queryRunner.manager.save(advancement);
+
+      await queryRunner.commitTransaction();
+
+      return {
+        success: true,
+        newClass: this.mapToResponseDto(targetClass),
+        statChanges: {}, // No stat changes for awaken
+        unequippedItemIds: [], // No equipment restrictions for tier 1
+        unlockedSkills: [], // No skills for basic awaken
+        message: `Thức tỉnh thành công! Bạn đã trở thành ${targetClass.name}`,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Special advancement method for pending advancement (from random selection)
+   * Bypasses advancement path requirements since it's already been randomly selected
+   */
+  async performPendingAdvancement(
+    dto: PerformAdvancementDto,
+  ): Promise<AdvancementResultDto> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: dto.userId },
+        relations: ['characterClass'],
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const targetClass = await queryRunner.manager.findOne(CharacterClass, {
+        where: { id: dto.targetClassId },
+      });
+
+      if (!targetClass) {
+        throw new NotFoundException('Target class not found');
+      }
+
+      // Basic level check only (no other requirements for pending advancement)
+      if (user.level < targetClass.requiredLevel) {
+        throw new BadRequestException(
+          `User level ${user.level} is below required level ${targetClass.requiredLevel}`,
+        );
+      }
+
+      // Store previous class for history
+      const previousClassId = user.characterClass?.id || null;
+
+      // Set user's character class
+      user.characterClass = targetClass;
+      await queryRunner.manager.save(user);
+
+      // Record class history
+      const classHistory = queryRunner.manager.create(CharacterClassHistory, {
+        characterId: dto.userId,
+        previousClassId,
+        newClassId: dto.targetClassId,
+        reason: 'pending_advancement',
+        triggeredByUserId: dto.userId,
+      });
+      await queryRunner.manager.save(classHistory);
+
+      // Create advancement record
+      const advancement = queryRunner.manager.create(CharacterAdvancement, {
+        userId: dto.userId,
+        currentClassId: dto.targetClassId,
+        advancementStatus: AdvancementStatus.COMPLETED,
+        advancementDate: new Date(),
+        completedRequirements: { dungeons: [], quests: [], items: [] },
+      });
+      await queryRunner.manager.save(advancement);
+
+      await queryRunner.commitTransaction();
+
+      return {
+        success: true,
+        newClass: this.mapToResponseDto(targetClass),
+        statChanges: {},
+        unequippedItemIds: [],
+        unlockedSkills: [],
+        message: `Thức tỉnh thành công! Bạn đã trở thành ${targetClass.name}`,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Get pending advancement for user (if any)
+   */
+  async getPendingAdvancement(userId: number): Promise<any> {
+    const pending = await this.pendingAdvancementRepository.findOne({
+      where: { userId, status: 'available' },
+    });
+
+    if (!pending) return null;
+
+    // Get class details for the options
+    const classIds = pending.options.map((opt) => opt.toClassId);
+    const classes = await this.characterClassRepository.find({
+      where: classIds.map((id) => ({ id })),
+    });
+
+    const classMap = classes.reduce(
+      (acc, cls) => {
+        acc[cls.id] = cls;
+        return acc;
+      },
+      {} as Record<number, any>,
+    );
+
+    return {
+      id: pending.id,
+      options: pending.options.map((opt) => ({
+        ...opt,
+        classInfo: classMap[opt.toClassId],
+      })),
+      createdAt: pending.createdAt,
+    };
+  }
+
+  /**
+   * Create pending advancement from random selection
+   */
+  async createPendingAdvancement(
+    userId: number,
+    selectedOption: any,
+  ): Promise<void> {
+    // Clear any existing pending advancement
+    await this.pendingAdvancementRepository.delete({ userId });
+
+    // Create new pending advancement
+    const pending = this.pendingAdvancementRepository.create({
+      userId,
+      options: [selectedOption],
+      status: 'available',
+    });
+
+    await this.pendingAdvancementRepository.save(pending);
+  }
+
+  /**
+   * Accept pending advancement (perform the actual advancement)
+   */
+  async acceptPendingAdvancement(userId: number): Promise<any> {
+    const pending = await this.pendingAdvancementRepository.findOne({
+      where: { userId, status: 'available' },
+    });
+
+    if (!pending || pending.options.length === 0) {
+      throw new BadRequestException('No pending advancement found');
+    }
+
+    const option = pending.options[0];
+    // Before performing a pending advancement (e.g. random/secret picks),
+    // ensure the user actually meets the advancement requirements for the
+    // selected target. Previously pending advancements bypassed the full
+    // requirement checks and only enforced a basic level check which made it
+    // possible to accept a pending option even when the user hadn't met
+    // dungeon/quest/item/stat requirements. That behaviour is unsafe.
+    const check = await this.checkAdvancementRequirements(
+      userId,
+      option.toClassId,
+    );
+    if (!check.canAdvance) {
+      // Return the missing requirements to the caller so the client can
+      // display informative feedback and avoid silently accepting.
+      throw new BadRequestException({
+        message: 'Advancement requirements not met for pending option',
+        missingRequirements: check.missingRequirements,
+      });
+    }
+
+    // Perform the advancement now that requirements are satisfied
+    const result = await this.performPendingAdvancement({
+      userId,
+      targetClassId: option.toClassId,
+    });
+
+    // Mark as accepted
+    pending.status = 'accepted';
+    await this.pendingAdvancementRepository.save(pending);
+
+    return result;
+  }
+
+  /**
+   * Clear pending advancement
+   */
+  async clearPendingAdvancement(userId: number): Promise<void> {
+    await this.pendingAdvancementRepository.delete({ userId });
   }
 
   async getUserAdvancementHistory(
@@ -562,8 +1001,13 @@ export class CharacterClassService {
     });
 
     if (usersUsingClass > 0) {
-      throw new BadRequestException(
-        'Cannot delete character class that is currently in use by users',
+      // Set users back to null class (they can awaken again)
+      await this.userRepository.update(
+        { characterClass: { id } },
+        { characterClass: null },
+      );
+      console.log(
+        `Reset ${usersUsingClass} users from deleted class ${id} to null (can awaken again)`,
       );
     }
 
@@ -573,8 +1017,12 @@ export class CharacterClassService {
     });
 
     if (advancementCount > 0) {
-      throw new BadRequestException(
-        'Cannot delete character class that has been used in advancement history',
+      // Delete advancement history records for this class
+      await this.characterAdvancementRepository.delete({
+        currentClassId: id,
+      });
+      console.log(
+        `Deleted ${advancementCount} advancement history records for class ${id}`,
       );
     }
 

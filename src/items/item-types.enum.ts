@@ -1,12 +1,12 @@
 export enum ItemType {
   // Equipment slots (6 total)
-  WEAPON = 'weapon',        // Vũ khí chính
-  HELMET = 'helmet',        // Mũ/Nón bảo hộ
-  ARMOR = 'armor',          // Áo giáp
-  GLOVES = 'gloves',        // Găng tay
-  BOOTS = 'boots',          // Giày/Ủng
-  ACCESSORY = 'accessory',  // Phụ kiện (nhẫn, dây chuyền)
-  
+  WEAPON = 'weapon', // Vũ khí chính
+  HELMET = 'helmet', // Mũ/Nón bảo hộ
+  ARMOR = 'armor', // Áo giáp
+  GLOVES = 'gloves', // Găng tay
+  BOOTS = 'boots', // Giày/Ủng
+  ACCESSORY = 'accessory', // Phụ kiện (nhẫn, dây chuyền)
+
   // Non-equipment items
   CONSUMABLE = 'consumable',
   MATERIAL = 'material',

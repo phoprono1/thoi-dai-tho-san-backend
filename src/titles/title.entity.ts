@@ -8,18 +8,18 @@ import {
 
 export enum TitleRarity {
   COMMON = 'common',
-  UNCOMMON = 'uncommon', 
+  UNCOMMON = 'uncommon',
   RARE = 'rare',
   EPIC = 'epic',
   LEGENDARY = 'legendary',
 }
 
 export enum TitleSource {
-  ACHIEVEMENT = 'achievement',  // Từ thành tựu
-  PVP_RANK = 'pvp_rank',       // Từ rank PvP
-  GUILD_RANK = 'guild_rank',   // Từ cấp bậc guild
-  EVENT = 'event',             // Từ sự kiện
-  ADMIN = 'admin',             // Admin tặng
+  ACHIEVEMENT = 'achievement', // Từ thành tựu
+  PVP_RANK = 'pvp_rank', // Từ rank PvP
+  GUILD_RANK = 'guild_rank', // Từ cấp bậc guild
+  EVENT = 'event', // Từ sự kiện
+  ADMIN = 'admin', // Admin tặng
 }
 
 @Entity()
@@ -60,12 +60,12 @@ export class Title {
   // Visual effects for title display
   @Column('json', { nullable: true })
   displayEffects: {
-    color?: string;        // Text color (#hex)
+    color?: string; // Text color (#hex)
     backgroundColor?: string; // Background color
-    borderColor?: string;  // Border color
-    glow?: boolean;        // Glow effect
-    animation?: string;    // Animation type (pulse, fade, etc.)
-    prefix?: string;       // Prefix before name "[Lord] PlayerName"
+    borderColor?: string; // Border color
+    glow?: boolean; // Glow effect
+    animation?: string; // Animation type (pulse, fade, etc.)
+    prefix?: string; // Prefix before name "[Lord] PlayerName"
   };
 
   // Unlock requirements
@@ -76,7 +76,7 @@ export class Title {
     pvpRank?: string; // HunterRank enum values
     guildLevel?: number;
     achievementIds?: number[];
-    
+
     // Combat requirements (detailed tracking like Quest system)
     killEnemies?: {
       enemyType: string; // Monster type or specific monster name
@@ -92,35 +92,35 @@ export class Title {
       bossName?: string; // For display
       count?: number; // How many times to defeat
     }[];
-    
+
     // Collection requirements
     itemsRequired?: {
       itemId: number;
       itemName?: string; // For display
       quantity: number;
     }[];
-    
+
     // PvP requirements
     pvpWins?: number;
     pvpPoints?: number; // Minimum hunter points
     pvpWinStreak?: number; // Consecutive wins
-    
+
     // Guild requirements
     guildContribution?: number;
     guildRank?: string; // Guild member rank
-    
+
     // Economic requirements
     goldSpent?: number;
     goldOwned?: number; // Current gold amount
     experienceGained?: number;
-    
+
     // Time-based requirements
     playTimeDays?: number; // Days since account creation
     loginStreak?: number; // Consecutive login days
-    
+
     // Meta requirements
     titlesUnlocked?: number; // Number of other titles unlocked
-    
+
     description?: string;
   };
 

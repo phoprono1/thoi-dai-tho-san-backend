@@ -7,14 +7,14 @@ import {
 } from 'typeorm';
 
 export enum HunterRank {
-  APPRENTICE = 'APPRENTICE',        // Thợ Săn Tập Sự (0-999)
-  AMATEUR = 'AMATEUR',              // Thợ Săn Nghiệp Dư (1000-1499)  
-  PROFESSIONAL = 'PROFESSIONAL',    // Thợ Săn Chuyên Nghiệp (1500-1999)
-  ELITE = 'ELITE',                  // Thợ Săn Tinh Anh (2000-2499)
-  EPIC = 'EPIC',                    // Thợ Săn Sử Thi (2500-2999)
-  LEGENDARY = 'LEGENDARY',          // Thợ Săn Truyền Thuyết (3000-3499)
-  MYTHICAL = 'MYTHICAL',            // Thợ Săn Huyền Thoại (3500-3999)
-  DIVINE = 'DIVINE',                // Thợ Săn Thần Thoại (4000+)
+  APPRENTICE = 'APPRENTICE', // Thợ Săn Tập Sự (0-999)
+  AMATEUR = 'AMATEUR', // Thợ Săn Nghiệp Dư (1000-1499)
+  PROFESSIONAL = 'PROFESSIONAL', // Thợ Săn Chuyên Nghiệp (1500-1999)
+  ELITE = 'ELITE', // Thợ Săn Tinh Anh (2000-2499)
+  EPIC = 'EPIC', // Thợ Săn Sử Thi (2500-2999)
+  LEGENDARY = 'LEGENDARY', // Thợ Săn Truyền Thuyết (3000-3499)
+  MYTHICAL = 'MYTHICAL', // Thợ Săn Huyền Thoại (3500-3999)
+  DIVINE = 'DIVINE', // Thợ Săn Thần Thoại (4000+)
 }
 
 export const RANK_THRESHOLDS = {
@@ -69,9 +69,21 @@ export class PvpSeason {
       };
     };
     seasonal: {
-      top1: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
-      top2to3: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
-      top4to10: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
+      top1: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
+      top2to3: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
+      top4to10: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
     };
   };
 
@@ -108,9 +120,10 @@ export function calculateEloChange(
   playerRating: number,
   opponentRating: number,
   isWin: boolean,
-  kFactor: number = 32
+  kFactor: number = 32,
 ): number {
-  const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - playerRating) / 400));
+  const expectedScore =
+    1 / (1 + Math.pow(10, (opponentRating - playerRating) / 400));
   const actualScore = isWin ? 1 : 0;
   return Math.round(kFactor * (actualScore - expectedScore));
 }

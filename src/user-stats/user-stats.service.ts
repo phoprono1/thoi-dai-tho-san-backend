@@ -5,12 +5,12 @@ import { UserStat } from './user-stat.entity';
 import { UserPowerService } from '../user-power/user-power.service';
 import { LevelsService } from '../levels/levels.service';
 import { UserItemsService } from '../user-items/user-items.service';
-import { ItemSetsService } from '../items/item-sets.service';
+import { GuildBuffService } from '../guild/guild-buff.service';
 import { GlobalGuildBuffService } from '../guild/global-guild-buff.service';
 import { SetBonusType } from '../items/item-set.entity';
 import { User } from '../users/user.entity';
 import { TitlesService } from '../titles/titles.service';
-
+import { ItemSetsService } from '../items/item-sets.service';
 @Injectable()
 export class UserStatsService {
   constructor(
@@ -410,6 +410,8 @@ export class UserStatsService {
       totalVit += classBonuses.vitality || 0;
       totalLuk += classBonuses.luck || 0;
     }
+
+    // Note: Class history buffs will be implemented separately to avoid circular dependency
 
     // 4. Equipment bonuses (temporary when equipped)
     try {

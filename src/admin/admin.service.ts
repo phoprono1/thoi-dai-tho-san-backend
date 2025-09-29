@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { UserStat } from '../user-stats/user-stat.entity';
+import { CharacterClassHistory } from '../character-classes/character-class-history.entity';
 
 @Injectable()
 export class AdminService {
@@ -11,16 +12,20 @@ export class AdminService {
     private usersRepository: Repository<User>,
     @InjectRepository(UserStat)
     private userStatsRepository: Repository<UserStat>,
+    @InjectRepository(CharacterClassHistory)
+    private characterClassHistoryRepository: Repository<CharacterClassHistory>,
   ) {}
 
   async resetAllUsers(): Promise<{ ok: boolean; count: number }> {
     const users = await this.usersRepository.find();
     let count = 0;
     for (const user of users) {
-      // Reset level and exp
+      // Reset level, exp and character class
       user.level = 1;
       user.experience = 0;
+      user.characterClass = null;
       await this.usersRepository.save(user);
+
       // Reset stats
       const stat = await this.userStatsRepository.findOne({
         where: { userId: user.id },
@@ -40,6 +45,12 @@ export class AdminService {
         stat.luckPoints = 0;
         await this.userStatsRepository.save(stat);
       }
+
+      // Reset character class - remove all class history
+      await this.characterClassHistoryRepository.delete({
+        characterId: user.id,
+      });
+
       count++;
     }
     return { ok: true, count };

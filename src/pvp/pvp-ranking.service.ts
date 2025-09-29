@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, Not } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -52,7 +57,7 @@ export class PvpRankingService {
   // Get or create user ranking for current season
   async getUserRanking(userId: number): Promise<PvpRanking> {
     const season = await this.getCurrentSeason();
-    
+
     let ranking = await this.pvpRankingRepository.findOne({
       where: { userId, seasonId: season.id },
       relations: ['user', 'season'],
@@ -67,7 +72,7 @@ export class PvpRankingService {
         currentRank: HunterRank.APPRENTICE,
       });
       ranking = await this.pvpRankingRepository.save(ranking);
-      
+
       // Load relations
       ranking = await this.pvpRankingRepository.findOne({
         where: { id: ranking.id },
@@ -88,7 +93,7 @@ export class PvpRankingService {
   // Get potential opponents (5 random players with similar rating)
   async getPotentialOpponents(userId: number): Promise<PvpRanking[]> {
     const userRanking = await this.getUserRanking(userId);
-    
+
     // No cooldown check - always allow viewing opponents
 
     const pointsRange = 200; // ±200 points range
@@ -110,7 +115,7 @@ export class PvpRankingService {
 
     // No need to update refresh timestamp since there's no cooldown
     // Ensure calculated properties are included for opponents
-    return opponents.map(opponent => ({
+    return opponents.map((opponent) => ({
       ...opponent,
       rankName: opponent.rankName,
       winRate: opponent.winRate,
@@ -120,14 +125,23 @@ export class PvpRankingService {
   }
 
   // Challenge another player
-  async challengePlayer(challengerId: number, defenderId: number): Promise<PvpMatch> {
+  async challengePlayer(
+    challengerId: number,
+    defenderId: number,
+  ): Promise<PvpMatch> {
     const challengerRanking = await this.getUserRanking(challengerId);
     const defenderRanking = await this.getUserRanking(defenderId);
 
     // Check cooldown (skip for first time)
     if (challengerRanking.lastMatchAt && !challengerRanking.canFight) {
-      const remainingTime = Math.ceil((60000 - (new Date().getTime() - challengerRanking.lastMatchAt.getTime())) / 1000);
-      throw new BadRequestException(`You must wait ${remainingTime} seconds between matches`);
+      const remainingTime = Math.ceil(
+        (60000 -
+          (new Date().getTime() - challengerRanking.lastMatchAt.getTime())) /
+          1000,
+      );
+      throw new BadRequestException(
+        `You must wait ${remainingTime} seconds between matches`,
+      );
     }
 
     if (challengerId === defenderId) {
@@ -135,8 +149,10 @@ export class PvpRankingService {
     }
 
     // Get user stats for combat
-    const challengerStats = await this.userStatsService.getTotalStatsWithAllBonuses(challengerId);
-    const defenderStats = await this.userStatsService.getTotalStatsWithAllBonuses(defenderId);
+    const challengerStats =
+      await this.userStatsService.getTotalStatsWithAllBonuses(challengerId);
+    const defenderStats =
+      await this.userStatsService.getTotalStatsWithAllBonuses(defenderId);
 
     // Use proper stat converter for combat stats
     const challengerCombatStats = deriveCombatStats({
@@ -191,8 +207,14 @@ export class PvpRankingService {
     const defenderPointsChange = -challengerPointsChange;
 
     // Update rankings
-    const newChallengerPoints = Math.max(0, challengerRanking.hunterPoints + challengerPointsChange);
-    const newDefenderPoints = Math.max(0, defenderRanking.hunterPoints + defenderPointsChange);
+    const newChallengerPoints = Math.max(
+      0,
+      challengerRanking.hunterPoints + challengerPointsChange,
+    );
+    const newDefenderPoints = Math.max(
+      0,
+      defenderRanking.hunterPoints + defenderPointsChange,
+    );
 
     // Create match record
     const match = this.pvpMatchRepository.create({
@@ -216,12 +238,18 @@ export class PvpRankingService {
     challengerRanking.currentRank = calculateRank(newChallengerPoints);
     challengerRanking.totalMatches += 1;
     challengerRanking.lastMatchAt = new Date();
-    challengerRanking.highestPoints = Math.max(challengerRanking.highestPoints, newChallengerPoints);
+    challengerRanking.highestPoints = Math.max(
+      challengerRanking.highestPoints,
+      newChallengerPoints,
+    );
 
     if (isWin) {
       challengerRanking.wins += 1;
       challengerRanking.winStreak += 1;
-      challengerRanking.bestWinStreak = Math.max(challengerRanking.bestWinStreak, challengerRanking.winStreak);
+      challengerRanking.bestWinStreak = Math.max(
+        challengerRanking.bestWinStreak,
+        challengerRanking.winStreak,
+      );
     } else {
       challengerRanking.losses += 1;
       challengerRanking.winStreak = 0;
@@ -231,12 +259,18 @@ export class PvpRankingService {
     defenderRanking.hunterPoints = newDefenderPoints;
     defenderRanking.currentRank = calculateRank(newDefenderPoints);
     defenderRanking.totalMatches += 1;
-    defenderRanking.highestPoints = Math.max(defenderRanking.highestPoints, newDefenderPoints);
+    defenderRanking.highestPoints = Math.max(
+      defenderRanking.highestPoints,
+      newDefenderPoints,
+    );
 
     if (!isWin) {
       defenderRanking.wins += 1;
       defenderRanking.winStreak += 1;
-      defenderRanking.bestWinStreak = Math.max(defenderRanking.bestWinStreak, defenderRanking.winStreak);
+      defenderRanking.bestWinStreak = Math.max(
+        defenderRanking.bestWinStreak,
+        defenderRanking.winStreak,
+      );
     } else {
       defenderRanking.losses += 1;
       defenderRanking.winStreak = 0;
@@ -252,10 +286,13 @@ export class PvpRankingService {
   }
 
   // Get leaderboard
-  async getLeaderboard(seasonId?: number, limit: number = 100): Promise<PvpRanking[]> {
-    const season = seasonId ? 
-      await this.pvpSeasonRepository.findOne({ where: { id: seasonId } }) :
-      await this.getCurrentSeason();
+  async getLeaderboard(
+    seasonId?: number,
+    limit: number = 100,
+  ): Promise<PvpRanking[]> {
+    const season = seasonId
+      ? await this.pvpSeasonRepository.findOne({ where: { id: seasonId } })
+      : await this.getCurrentSeason();
 
     if (!season) {
       throw new NotFoundException('Season not found');
@@ -269,7 +306,7 @@ export class PvpRankingService {
     });
 
     // Ensure calculated properties are included
-    return leaderboard.map(ranking => ({
+    return leaderboard.map((ranking) => ({
       ...ranking,
       rankName: ranking.rankName,
       winRate: ranking.winRate,
@@ -279,12 +316,12 @@ export class PvpRankingService {
   }
 
   // Get user match history
-  async getMatchHistory(userId: number, limit: number = 20): Promise<PvpMatch[]> {
+  async getMatchHistory(
+    userId: number,
+    limit: number = 20,
+  ): Promise<PvpMatch[]> {
     return this.pvpMatchRepository.find({
-      where: [
-        { challengerId: userId },
-        { defenderId: userId },
-      ],
+      where: [{ challengerId: userId }, { defenderId: userId }],
       relations: ['challenger', 'defender', 'season'],
       order: { createdAt: 'DESC' },
       take: limit,
@@ -292,11 +329,16 @@ export class PvpRankingService {
   }
 
   // Claim daily reward
-  async claimDailyReward(userId: number): Promise<{ gold: number; experience: number; items?: any[] }> {
+  async claimDailyReward(
+    userId: number,
+  ): Promise<{ gold: number; experience: number; items?: any[] }> {
     const ranking = await this.getUserRanking(userId);
     const today = new Date().toDateString();
 
-    if (ranking.hasClaimedDailyReward && ranking.lastDailyRewardDate?.toDateString() === today) {
+    if (
+      ranking.hasClaimedDailyReward &&
+      ranking.lastDailyRewardDate?.toDateString() === today
+    ) {
       throw new BadRequestException('Daily reward already claimed today');
     }
 
@@ -309,10 +351,10 @@ export class PvpRankingService {
 
     // Build content with items if available
     let content = `Chúc mừng! Bạn đã nhận được phần thưởng hàng ngày cho rank ${ranking.rankName}.\n\nPhần thưởng:\n- ${rankRewards.gold} vàng\n- ${rankRewards.experience} kinh nghiệm`;
-    
+
     if (rankRewards.items && rankRewards.items.length > 0) {
       content += '\n- Vật phẩm:';
-      rankRewards.items.forEach(item => {
+      rankRewards.items.forEach((item) => {
         content += `\n  • ${item.quantity}x Item ID ${item.itemId}`;
       });
     }
@@ -336,7 +378,9 @@ export class PvpRankingService {
     ranking.lastDailyRewardDate = new Date();
     await this.pvpRankingRepository.save(ranking);
 
-    this.logger.log(`User ${userId} claimed daily PvP reward via mailbox: ${rankRewards.gold} gold, ${rankRewards.experience} exp`);
+    this.logger.log(
+      `User ${userId} claimed daily PvP reward via mailbox: ${rankRewards.gold} gold, ${rankRewards.experience} exp`,
+    );
 
     return rankRewards;
   }
@@ -345,10 +389,10 @@ export class PvpRankingService {
   @Cron('0 0 * * *', { timeZone: 'Asia/Ho_Chi_Minh' })
   async resetDailyRewards() {
     this.logger.log('Resetting daily PvP rewards...');
-    
+
     await this.pvpRankingRepository.update(
       { hasClaimedDailyReward: true },
-      { hasClaimedDailyReward: false }
+      { hasClaimedDailyReward: false },
     );
 
     this.logger.log('Daily PvP rewards reset completed');
@@ -365,7 +409,7 @@ export class PvpRankingService {
     // Deactivate current season
     await this.pvpSeasonRepository.update(
       { isActive: true },
-      { isActive: false }
+      { isActive: false },
     );
 
     const season = this.pvpSeasonRepository.create({
@@ -377,15 +421,20 @@ export class PvpRankingService {
   }
 
   // Admin: Update season
-  async updateSeason(seasonId: number, updateData: Partial<{
-    name: string;
-    description: string;
-    startDate: Date;
-    endDate: Date;
-    rewards: any;
-  }>): Promise<PvpSeason> {
+  async updateSeason(
+    seasonId: number,
+    updateData: Partial<{
+      name: string;
+      description: string;
+      startDate: Date;
+      endDate: Date;
+      rewards: any;
+    }>,
+  ): Promise<PvpSeason> {
     await this.pvpSeasonRepository.update(seasonId, updateData);
-    const updatedSeason = await this.pvpSeasonRepository.findOne({ where: { id: seasonId } });
+    const updatedSeason = await this.pvpSeasonRepository.findOne({
+      where: { id: seasonId },
+    });
     if (!updatedSeason) {
       throw new NotFoundException('Season not found');
     }
@@ -423,16 +472,20 @@ export class PvpRankingService {
     topPlayers: PvpRanking[];
   }> {
     const season = await this.getCurrentSeason();
-    
-    const totalPlayers = await this.pvpRankingRepository.count({ where: { seasonId: season.id } });
-    const totalMatches = await this.pvpMatchRepository.count({ where: { seasonId: season.id } });
-    
+
+    const totalPlayers = await this.pvpRankingRepository.count({
+      where: { seasonId: season.id },
+    });
+    const totalMatches = await this.pvpMatchRepository.count({
+      where: { seasonId: season.id },
+    });
+
     const avgResult = await this.pvpRankingRepository
       .createQueryBuilder('ranking')
       .select('AVG(ranking.hunterPoints)', 'average')
       .where('ranking.seasonId = :seasonId', { seasonId: season.id })
       .getRawOne();
-    
+
     const averageRating = Math.round(parseFloat(avgResult.average) || 1200);
 
     // Get rank distribution
@@ -458,7 +511,7 @@ export class PvpRankingService {
   // Admin: Reset rankings for new season
   async resetRankings(): Promise<void> {
     const season = await this.getCurrentSeason();
-    
+
     await this.pvpRankingRepository.update(
       { seasonId: season.id },
       {
@@ -472,7 +525,7 @@ export class PvpRankingService {
         highestPoints: 1200,
         hasClaimedDailyReward: false,
         lastDailyRewardDate: null,
-      }
+      },
     );
 
     this.logger.log(`Reset all rankings for season ${season.id}`);
@@ -481,16 +534,21 @@ export class PvpRankingService {
   // Admin: Sync all players to PvP system
   async syncAllPlayers(): Promise<{ syncedCount: number; message: string }> {
     const season = await this.getCurrentSeason();
-    
+
     // Get all users who don't have PvP ranking yet
     const usersWithoutRanking = await this.userRepository
       .createQueryBuilder('user')
-      .leftJoin(PvpRanking, 'ranking', 'ranking.userId = user.id AND ranking.seasonId = :seasonId', { seasonId: season.id })
+      .leftJoin(
+        PvpRanking,
+        'ranking',
+        'ranking.userId = user.id AND ranking.seasonId = :seasonId',
+        { seasonId: season.id },
+      )
       .where('ranking.id IS NULL')
       .getMany();
 
     let syncedCount = 0;
-    
+
     for (const user of usersWithoutRanking) {
       try {
         // Create new ranking for user
@@ -507,8 +565,10 @@ export class PvpRankingService {
       }
     }
 
-    this.logger.log(`Synced ${syncedCount} players to PvP system for season ${season.id}`);
-    
+    this.logger.log(
+      `Synced ${syncedCount} players to PvP system for season ${season.id}`,
+    );
+
     return {
       syncedCount,
       message: `Successfully synced ${syncedCount} players to PvP system`,

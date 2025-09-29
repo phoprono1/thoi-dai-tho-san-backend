@@ -1040,7 +1040,11 @@ export class GuildService {
   }
 
   // Admin: Reset guild level
-  async resetGuildLevel(guildId: number, newLevel: number, newExperience: number = 0): Promise<Guild> {
+  async resetGuildLevel(
+    guildId: number,
+    newLevel: number,
+    newExperience: number = 0,
+  ): Promise<Guild> {
     const guild = await this.guildRepository.findOne({
       where: { id: guildId },
       relations: ['members', 'members.user'],
@@ -1061,7 +1065,9 @@ export class GuildService {
     const updatedGuild = await this.guildRepository.save(guild);
 
     // Log the admin action
-    this.logger.log(`Admin reset guild ${guild.name} (ID: ${guildId}) to level ${newLevel} with ${newExperience} experience`);
+    this.logger.log(
+      `Admin reset guild ${guild.name} (ID: ${guildId}) to level ${newLevel} with ${newExperience} experience`,
+    );
 
     return updatedGuild;
   }

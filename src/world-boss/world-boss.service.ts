@@ -895,7 +895,8 @@ export class WorldBossService {
     if (updateData.level) boss.level = updateData.level;
     if (updateData.maxHp) boss.maxHp = updateData.maxHp;
     if (updateData.stats) boss.stats = updateData.stats;
-    if (updateData.durationMinutes) boss.durationMinutes = updateData.durationMinutes;
+    if (updateData.durationMinutes)
+      boss.durationMinutes = updateData.durationMinutes;
     if (updateData.image) boss.image = updateData.image;
 
     // Update end time if duration changed

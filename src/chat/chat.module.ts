@@ -16,7 +16,13 @@ import { Title } from '../titles/title.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ChatMessage, User, GuildMember, UserTitle, Title]),
+    TypeOrmModule.forFeature([
+      ChatMessage,
+      User,
+      GuildMember,
+      UserTitle,
+      Title,
+    ]),
     UsersModule,
     GuildModule,
     CommonModule,

@@ -36,9 +36,21 @@ interface CreateSeasonDto {
       };
     };
     seasonal: {
-      top1: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
-      top2to3: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
-      top4to10: { gold: number; experience: number; items?: Array<{ itemId: number; quantity: number }> };
+      top1: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
+      top2to3: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
+      top4to10: {
+        gold: number;
+        experience: number;
+        items?: Array<{ itemId: number; quantity: number }>;
+      };
     };
   };
 }
@@ -71,7 +83,9 @@ export class PvpAdminController {
     description: 'Mùa giải đã được tạo',
     type: PvpSeason,
   })
-  async createSeason(@Body() createSeasonDto: CreateSeasonDto): Promise<PvpSeason> {
+  async createSeason(
+    @Body() createSeasonDto: CreateSeasonDto,
+  ): Promise<PvpSeason> {
     return this.pvpRankingService.createSeason({
       name: createSeasonDto.name,
       description: createSeasonDto.description,
@@ -94,8 +108,12 @@ export class PvpAdminController {
   ): Promise<PvpSeason> {
     const updateData = {
       ...updateSeasonDto,
-      startDate: updateSeasonDto.startDate ? new Date(updateSeasonDto.startDate) : undefined,
-      endDate: updateSeasonDto.endDate ? new Date(updateSeasonDto.endDate) : undefined,
+      startDate: updateSeasonDto.startDate
+        ? new Date(updateSeasonDto.startDate)
+        : undefined,
+      endDate: updateSeasonDto.endDate
+        ? new Date(updateSeasonDto.endDate)
+        : undefined,
     };
     return this.pvpRankingService.updateSeason(parseInt(id), updateData);
   }
@@ -158,17 +176,23 @@ export class PvpAdminController {
     status: 200,
     description: 'Thưởng cuối mùa đã được phát',
   })
-  async distributeSeasonalRewards(): Promise<{ message: string; rewards: any[] }> {
+  async distributeSeasonalRewards(): Promise<{
+    message: string;
+    rewards: any[];
+  }> {
     // This would need to be implemented in the service
-    const topPlayers = await this.pvpRankingService.getLeaderboard(undefined, 10);
+    const topPlayers = await this.pvpRankingService.getLeaderboard(
+      undefined,
+      10,
+    );
     const season = await this.pvpRankingService.getCurrentSeason();
-    
+
     const rewards = [];
-    
+
     for (let i = 0; i < topPlayers.length; i++) {
       const player = topPlayers[i];
       let rewardTier: 'top1' | 'top2to3' | 'top4to10';
-      
+
       if (i === 0) {
         rewardTier = 'top1';
       } else if (i <= 2) {
@@ -176,14 +200,17 @@ export class PvpAdminController {
       } else {
         rewardTier = 'top4to10';
       }
-      
+
       const reward = season.rewards?.seasonal?.[rewardTier];
       if (reward) {
         // Send seasonal rewards via mailbox
-        const rankText = i === 0 ? '🥇 Hạng 1' : 
-                        i <= 2 ? `🥈 Hạng ${i + 1}` : 
-                        `🥉 Hạng ${i + 1}`;
-        
+        const rankText =
+          i === 0
+            ? '🥇 Hạng 1'
+            : i <= 2
+              ? `🥈 Hạng ${i + 1}`
+              : `🥉 Hạng ${i + 1}`;
+
         await this.mailboxService.sendMail({
           userId: player.userId,
           title: `🏆 Phần thưởng cuối mùa PvP - ${rankText}`,
@@ -205,7 +232,7 @@ export class PvpAdminController {
         });
       }
     }
-    
+
     return {
       message: `Seasonal rewards distributed to ${rewards.length} players`,
       rewards,
@@ -221,7 +248,7 @@ export class PvpAdminController {
   async getDefaultSeasonConfig(): Promise<CreateSeasonDto> {
     const now = new Date();
     const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    
+
     return {
       name: `Mùa ${now.getFullYear()}-${now.getMonth() + 1}-${Math.ceil(now.getDate() / 7)}`,
       description: 'Mùa giải PvP hàng tuần',

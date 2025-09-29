@@ -59,7 +59,10 @@ export class PvpRankingController {
     @Request() req,
     @Param('defenderId') defenderId: string,
   ): Promise<PvpMatch> {
-    return this.pvpRankingService.challengePlayer(req.user.id, parseInt(defenderId));
+    return this.pvpRankingService.challengePlayer(
+      req.user.id,
+      parseInt(defenderId),
+    );
   }
 
   @Get('leaderboard')
@@ -116,9 +119,9 @@ export class PvpRankingController {
     status: 200,
     description: 'Phần thưởng đã được nhận',
   })
-  async claimDailyReward(@Request() req): Promise<{ 
-    gold: number; 
-    experience: number; 
+  async claimDailyReward(@Request() req): Promise<{
+    gold: number;
+    experience: number;
     items?: any[];
     message: string;
   }> {
@@ -140,7 +143,7 @@ export class PvpRankingController {
     // This would need to be implemented in the service
     // For now, we can get it from match history
     const matches = await this.pvpRankingService.getMatchHistory(0, 1000);
-    const match = matches.find(m => m.id === parseInt(matchId));
+    const match = matches.find((m) => m.id === parseInt(matchId));
     if (!match) {
       throw new Error('Match not found');
     }
@@ -161,14 +164,17 @@ export class PvpRankingController {
     nextRewardReset: string;
   }> {
     const ranking = await this.pvpRankingService.getUserRanking(req.user.id);
-    const recentMatches = await this.pvpRankingService.getMatchHistory(req.user.id, 5);
-    
+    const recentMatches = await this.pvpRankingService.getMatchHistory(
+      req.user.id,
+      5,
+    );
+
     // Calculate next reward reset (midnight Vietnam time)
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
-    
+
     return {
       ranking,
       recentMatches,

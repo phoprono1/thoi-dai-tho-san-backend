@@ -5,6 +5,7 @@ import { MappingsController } from './mappings.controller';
 import { AdminCharacterClassesController } from './admin-character-classes.controller';
 import { CharacterClassService } from './character-class.service';
 import { AdvancementService } from './advancement.service';
+import { CharacterClassBuffsService } from './character-class-buffs.service';
 import { CharacterClass, CharacterAdvancement } from './character-class.entity';
 import { CharacterClassAdvancement } from './character-class-advancement.entity';
 import { CharacterClassHistory } from './character-class-history.entity';
@@ -48,7 +49,15 @@ import { UserPowerModule } from '../user-power/user-power.module';
     MappingsController,
     AdminCharacterClassesController,
   ],
-  providers: [CharacterClassService, AdvancementService],
-  exports: [CharacterClassService, AdvancementService],
+  providers: [
+    CharacterClassService,
+    AdvancementService,
+    CharacterClassBuffsService,
+  ],
+  exports: [
+    CharacterClassService,
+    AdvancementService,
+    CharacterClassBuffsService,
+  ],
 })
 export class CharacterClassesModule {}

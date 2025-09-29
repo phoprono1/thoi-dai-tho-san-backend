@@ -129,4 +129,47 @@ export class CharacterClassController {
   ): Promise<CharacterClassResponseDto> {
     return this.characterClassService.updateClass(id, dto);
   }
+
+  // Pending advancement endpoints
+  @Get('advancement/pending')
+  @UseGuards(JwtAuthGuard)
+  async getPendingAdvancement(@Request() req: RequestWithUser) {
+    return this.characterClassService.getPendingAdvancement(req.user.id);
+  }
+
+  @Post('advancement/pending/accept')
+  @UseGuards(JwtAuthGuard)
+  async acceptCurrentPendingAdvancement(@Request() req: RequestWithUser) {
+    return this.characterClassService.acceptPendingAdvancement(req.user.id);
+  }
+
+  @Delete('advancement/pending')
+  @UseGuards(JwtAuthGuard)
+  async clearPendingAdvancement(@Request() req: RequestWithUser) {
+    return this.characterClassService.clearPendingAdvancement(req.user.id);
+  }
+
+  @Post('advancement/pending/create')
+  @UseGuards(JwtAuthGuard)
+  async createPendingAdvancement(
+    @Request() req: RequestWithUser,
+    @Body() body: any,
+  ) {
+    return this.characterClassService.createPendingAdvancement(
+      req.user.id,
+      body,
+    );
+  }
+
+  @Get('advancement/check/:targetClassId')
+  @UseGuards(JwtAuthGuard)
+  async checkAdvancementRequirements(
+    @Request() req: RequestWithUser,
+    @Param('targetClassId', ParseIntPipe) targetClassId: number,
+  ) {
+    return this.characterClassService.checkAdvancementRequirements(
+      req.user.id,
+      targetClassId,
+    );
+  }
 }

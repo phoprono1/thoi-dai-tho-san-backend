@@ -1,12 +1,14 @@
-import { MigrationInterface, QueryRunner } from "typeorm";
+import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class InsertGuildBuffsLevel11To201759038600000 implements MigrationInterface {
-    name = 'InsertGuildBuffsLevel11To201759038600000'
+export class InsertGuildBuffsLevel11To201759038600000
+  implements MigrationInterface
+{
+  name = 'InsertGuildBuffsLevel11To201759038600000';
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        // Only insert global guild buffs for levels 11-20 
-        // guild_buffs table is per-guild and gets populated when guilds are created
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    // Only insert global guild buffs for levels 11-20
+    // guild_buffs table is per-guild and gets populated when guilds are created
+    await queryRunner.query(`
             INSERT INTO "global_guild_buffs" ("guildLevel", "statBuffs", "description", "isActive") VALUES
             (11, '{"strength": 260, "intelligence": 260, "dexterity": 260, "vitality": 260, "luck": 260}', 'Guild Level 11 - Transcendent member benefits', true),
             (12, '{"strength": 330, "intelligence": 330, "dexterity": 330, "vitality": 330, "luck": 330}', 'Guild Level 12 - Celestial member benefits', true),
@@ -20,10 +22,12 @@ export class InsertGuildBuffsLevel11To201759038600000 implements MigrationInterf
             (20, '{"strength": 1500, "intelligence": 1500, "dexterity": 1500, "vitality": 1500, "luck": 1500}', 'Guild Level 20 - Omniversal member benefits', true)
             ON CONFLICT ("guildLevel") DO NOTHING;
         `);
-    }
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        // Remove global guild buffs for levels 11-20
-        await queryRunner.query(`DELETE FROM "global_guild_buffs" WHERE "guildLevel" BETWEEN 11 AND 20;`);
-    }
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    // Remove global guild buffs for levels 11-20
+    await queryRunner.query(
+      `DELETE FROM "global_guild_buffs" WHERE "guildLevel" BETWEEN 11 AND 20;`,
+    );
+  }
 }

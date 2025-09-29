@@ -28,7 +28,7 @@ export class ChatService {
 
   private async getUserEquippedTitle(userId: number) {
     if (!this.userTitleRepository) return null;
-    
+
     const equippedTitle = await this.userTitleRepository.findOne({
       where: { userId, isEquipped: true },
       relations: ['title'],
@@ -115,7 +115,7 @@ export class ChatService {
           createdAt: msg.createdAt,
           userTitle,
         };
-      })
+      }),
     );
 
     return messagesWithTitles;
@@ -145,7 +145,7 @@ export class ChatService {
           createdAt: msg.createdAt,
           userTitle,
         };
-      })
+      }),
     );
 
     return messagesWithTitles;

@@ -32,23 +32,23 @@ export function computeCombatPowerFromStats(
   opts: ComputeOptions = {},
 ): number {
   const p = opts.exponent ?? 0.94;
-  
+
   // Updated coefficients to match stat-converter.ts
   const coeffs = {
-    atkFromSTR: 0.45,     // stat-converter: atk_from_STR = 0.45
-    atkFromINT: 0.6,      // stat-converter: atk_from_INT = 0.6
-    atkFromDEX: 0.18,     // stat-converter: atk_from_DEX = 0.18
-    hpFromVIT: 12,        // stat-converter: hp_from_VIT = 12
-    defFromVIT: 0.5,      // stat-converter: def_from_VIT = 0.5
-    defFromDEX: 0.0,      // DEX doesn't contribute to defense in stat-converter
+    atkFromSTR: 0.45, // stat-converter: atk_from_STR = 0.45
+    atkFromINT: 0.6, // stat-converter: atk_from_INT = 0.6
+    atkFromDEX: 0.18, // stat-converter: atk_from_DEX = 0.18
+    hpFromVIT: 12, // stat-converter: hp_from_VIT = 12
+    defFromVIT: 0.5, // stat-converter: def_from_VIT = 0.5
+    defFromDEX: 0.0, // DEX doesn't contribute to defense in stat-converter
     ...(opts.coeffs || {}),
   };
 
   const weights = {
     attack: 1.0,
-    hp: 0.1,              // Slightly higher weight for HP
-    defense: 1.5,         // Lower weight for defense to balance
-    misc: 0.8,            // Higher weight for crit/luck
+    hp: 0.1, // Slightly higher weight for HP
+    defense: 1.5, // Lower weight for defense to balance
+    misc: 0.8, // Higher weight for crit/luck
     ...(opts.weights || {}),
   };
 

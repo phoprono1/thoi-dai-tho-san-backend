@@ -1,10 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Title, TitleSource, TitleRarity } from './title.entity';
 import { UserTitle } from './user-title.entity';
 import { UserItemsService } from '../user-items/user-items.service';
-import { CombatResult, CombatResultType } from '../combat-results/combat-result.entity';
+import {
+  CombatResult,
+  CombatResultType,
+} from '../combat-results/combat-result.entity';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -28,7 +37,7 @@ export class TitlesService {
     if (!includeHidden) {
       where.isHidden = false;
     }
-    
+
     return this.titleRepository.find({
       where,
       order: { rarity: 'ASC', name: 'ASC' },
@@ -53,7 +62,11 @@ export class TitlesService {
   }
 
   // Unlock title for user
-  async unlockTitle(userId: number, titleId: number, source?: string): Promise<UserTitle> {
+  async unlockTitle(
+    userId: number,
+    titleId: number,
+    source?: string,
+  ): Promise<UserTitle> {
     // Check if user already has this title
     const existing = await this.userTitleRepository.findOne({
       where: { userId, titleId },
@@ -121,8 +134,13 @@ export class TitlesService {
   }
 
   // Admin: Update title
-  async updateTitle(titleId: number, titleData: Partial<Title>): Promise<Title> {
-    const title = await this.titleRepository.findOne({ where: { id: titleId } });
+  async updateTitle(
+    titleId: number,
+    titleData: Partial<Title>,
+  ): Promise<Title> {
+    const title = await this.titleRepository.findOne({
+      where: { id: titleId },
+    });
     if (!title) {
       throw new NotFoundException('Title not found');
     }
@@ -146,13 +164,21 @@ export class TitlesService {
   }
 
   // Check if user meets title requirements
-  async checkTitleRequirements(userId: number, titleId: number): Promise<{
+  async checkTitleRequirements(
+    userId: number,
+    titleId: number,
+  ): Promise<{
     eligible: boolean;
     missingRequirements: string[];
   }> {
-    const title = await this.titleRepository.findOne({ where: { id: titleId } });
+    const title = await this.titleRepository.findOne({
+      where: { id: titleId },
+    });
     if (!title || !title.requirements) {
-      return { eligible: false, missingRequirements: ['Title not found or no requirements'] };
+      return {
+        eligible: false,
+        missingRequirements: ['Title not found or no requirements'],
+      };
     }
 
     const user = await this.userRepository.findOne({
@@ -168,7 +194,9 @@ export class TitlesService {
 
     // Check level requirement
     if (requirements.level && user.level < requirements.level) {
-      missing.push(`Level ${requirements.level} required (current: ${user.level})`);
+      missing.push(
+        `Level ${requirements.level} required (current: ${user.level})`,
+      );
     }
 
     // Check PvP rank requirement
@@ -177,35 +205,48 @@ export class TitlesService {
       // For now, skip this check
     }
 
-    if (requirements.guildLevel && (!user.guild || user.guild.level < requirements.guildLevel)) {
+    if (
+      requirements.guildLevel &&
+      (!user.guild || user.guild.level < requirements.guildLevel)
+    ) {
       missing.push(`Guild level ${requirements.guildLevel} required`);
     }
 
     // Check combat requirements
-    if (requirements.killEnemies || requirements.completeDungeons || requirements.defeatBoss) {
+    if (
+      requirements.killEnemies ||
+      requirements.completeDungeons ||
+      requirements.defeatBoss
+    ) {
       const combatStats = await this.getCombatStats(userId);
-      
+
       // Check enemy kill requirements
       if (requirements.killEnemies) {
         for (const enemyReq of requirements.killEnemies) {
           const userKills = combatStats.enemyKills[enemyReq.enemyType] || 0;
           if (userKills < enemyReq.count) {
-            missing.push(`${enemyReq.count} ${enemyReq.enemyType} kills required (current: ${userKills})`);
+            missing.push(
+              `${enemyReq.count} ${enemyReq.enemyType} kills required (current: ${userKills})`,
+            );
           }
         }
       }
-      
+
       // Check dungeon completion requirements
       if (requirements.completeDungeons) {
         for (const dungeonReq of requirements.completeDungeons) {
-          const userClears = combatStats.dungeonClearsByDungeon[dungeonReq.dungeonId] || 0;
+          const userClears =
+            combatStats.dungeonClearsByDungeon[dungeonReq.dungeonId] || 0;
           if (userClears < dungeonReq.count) {
-            const dungeonName = dungeonReq.dungeonName || `Dungeon ${dungeonReq.dungeonId}`;
-            missing.push(`${dungeonReq.count} clears of ${dungeonName} required (current: ${userClears})`);
+            const dungeonName =
+              dungeonReq.dungeonName || `Dungeon ${dungeonReq.dungeonId}`;
+            missing.push(
+              `${dungeonReq.count} clears of ${dungeonName} required (current: ${userClears})`,
+            );
           }
         }
       }
-      
+
       // Check boss defeat requirements
       if (requirements.defeatBoss) {
         for (const bossReq of requirements.defeatBoss) {
@@ -213,7 +254,9 @@ export class TitlesService {
           const requiredCount = bossReq.count || 1;
           if (userDefeats < requiredCount) {
             const bossName = bossReq.bossName || `Boss ${bossReq.bossId}`;
-            missing.push(`Defeat ${bossName} ${requiredCount} times (current: ${userDefeats})`);
+            missing.push(
+              `Defeat ${bossName} ${requiredCount} times (current: ${userDefeats})`,
+            );
           }
         }
       }
@@ -223,15 +266,18 @@ export class TitlesService {
     if (requirements.itemsRequired) {
       const userItems = await this.userItemsService.findByUserId(userId);
       const itemCounts: Record<number, number> = {};
-      
+
       for (const userItem of userItems) {
-        itemCounts[userItem.itemId] = (itemCounts[userItem.itemId] || 0) + userItem.quantity;
+        itemCounts[userItem.itemId] =
+          (itemCounts[userItem.itemId] || 0) + userItem.quantity;
       }
 
       for (const itemReq of requirements.itemsRequired) {
         const userCount = itemCounts[itemReq.itemId] || 0;
         if (userCount < itemReq.quantity) {
-          missing.push(`${itemReq.quantity} of item ${itemReq.itemId} required (current: ${userCount})`);
+          missing.push(
+            `${itemReq.quantity} of item ${itemReq.itemId} required (current: ${userCount})`,
+          );
         }
       }
     }
@@ -267,7 +313,8 @@ export class TitlesService {
       if (result.dungeon && result.result === CombatResultType.VICTORY) {
         dungeonClears++;
         const dungeonId = result.dungeon.id;
-        dungeonClearsByDungeon[dungeonId] = (dungeonClearsByDungeon[dungeonId] || 0) + 1;
+        dungeonClearsByDungeon[dungeonId] =
+          (dungeonClearsByDungeon[dungeonId] || 0) + 1;
       }
 
       // Parse combat logs for detailed enemy kills and boss defeats
@@ -276,10 +323,11 @@ export class TitlesService {
           try {
             // Combat logs should contain enemy kill data
             if (log.action === 'enemy_defeated' && log.data) {
-              const enemyType = log.data.enemyType || log.data.monsterType || 'unknown';
+              const enemyType =
+                log.data.enemyType || log.data.monsterType || 'unknown';
               enemyKills[enemyType] = (enemyKills[enemyType] || 0) + 1;
             }
-            
+
             // Boss defeat tracking
             if (log.action === 'boss_defeated' && log.data) {
               const bossId = log.data.bossId || log.data.monsterId;
@@ -307,8 +355,8 @@ export class TitlesService {
   async checkAndUnlockEligibleTitles(userId: number): Promise<UserTitle[]> {
     const allTitles = await this.getAllTitles();
     const userTitles = await this.getUserTitles(userId);
-    const unlockedTitleIds = new Set(userTitles.map(ut => ut.titleId));
-    
+    const unlockedTitleIds = new Set(userTitles.map((ut) => ut.titleId));
+
     const newlyUnlocked: UserTitle[] = [];
 
     for (const title of allTitles) {
@@ -317,13 +365,20 @@ export class TitlesService {
 
       // Check requirements
       const { eligible } = await this.checkTitleRequirements(userId, title.id);
-      
+
       if (eligible) {
         try {
-          const userTitle = await this.unlockTitle(userId, title.id, 'Auto-unlock: Requirements met');
+          const userTitle = await this.unlockTitle(
+            userId,
+            title.id,
+            'Auto-unlock: Requirements met',
+          );
           newlyUnlocked.push(userTitle);
         } catch (error) {
-          console.warn(`Failed to auto-unlock title ${title.id} for user ${userId}:`, error);
+          console.warn(
+            `Failed to auto-unlock title ${title.id} for user ${userId}:`,
+            error,
+          );
         }
       }
     }
@@ -339,7 +394,13 @@ export class TitlesService {
         description: 'Danh hiệu cho người mới bắt đầu',
         rarity: TitleRarity.COMMON,
         source: TitleSource.ACHIEVEMENT,
-        stats: { strength: 1, intelligence: 1, dexterity: 1, vitality: 1, luck: 1 },
+        stats: {
+          strength: 1,
+          intelligence: 1,
+          dexterity: 1,
+          vitality: 1,
+          luck: 1,
+        },
         displayEffects: {
           color: '#8B5A2B',
           prefix: '[Tân Thủ]',
@@ -363,7 +424,13 @@ export class TitlesService {
         description: 'Danh hiệu cho những thợ săn huyền thoại',
         rarity: TitleRarity.LEGENDARY,
         source: TitleSource.PVP_RANK,
-        stats: { strength: 50, intelligence: 50, dexterity: 50, vitality: 50, luck: 50 },
+        stats: {
+          strength: 50,
+          intelligence: 50,
+          dexterity: 50,
+          vitality: 50,
+          luck: 50,
+        },
         displayEffects: {
           color: '#FFD700',
           backgroundColor: '#FF6B35',
@@ -384,11 +451,9 @@ export class TitlesService {
           prefix: '[Sát Thủ]',
           animation: 'pulse',
         },
-        requirements: { 
-          killEnemies: [
-            { enemyType: 'Goblin', count: 100 }
-          ],
-          description: 'Tiêu diệt 100 Goblin'
+        requirements: {
+          killEnemies: [{ enemyType: 'Goblin', count: 100 }],
+          description: 'Tiêu diệt 100 Goblin',
         },
       },
       {
@@ -402,12 +467,12 @@ export class TitlesService {
           prefix: '[Chinh Phục]',
           animation: 'glow',
         },
-        requirements: { 
+        requirements: {
           completeDungeons: [
             { dungeonId: 1, dungeonName: 'Goblin Cave', count: 50 },
-            { dungeonId: 2, dungeonName: 'Dark Forest', count: 30 }
+            { dungeonId: 2, dungeonName: 'Dark Forest', count: 30 },
           ],
-          description: 'Hoàn thành Goblin Cave 50 lần và Dark Forest 30 lần'
+          description: 'Hoàn thành Goblin Cave 50 lần và Dark Forest 30 lần',
         },
       },
       {
@@ -420,12 +485,12 @@ export class TitlesService {
           color: '#059669',
           prefix: '[Thu Thập]',
         },
-        requirements: { 
+        requirements: {
           itemsRequired: [
             { itemId: 1, quantity: 100 }, // Ví dụ: 100 HP Potion
-            { itemId: 2, quantity: 50 },  // Ví dụ: 50 Energy Potion
+            { itemId: 2, quantity: 50 }, // Ví dụ: 50 Energy Potion
           ],
-          description: 'Sở hữu 100 HP Potion và 50 Energy Potion'
+          description: 'Sở hữu 100 HP Potion và 50 Energy Potion',
         },
       },
       {
@@ -440,12 +505,12 @@ export class TitlesService {
           prefix: '[Hủy Diệt]',
           animation: 'rainbow',
         },
-        requirements: { 
+        requirements: {
           defeatBoss: [
             { bossId: 1, bossName: 'Goblin King', count: 10 },
-            { bossId: 2, bossName: 'Dark Lord', count: 5 }
+            { bossId: 2, bossName: 'Dark Lord', count: 5 },
           ],
-          description: 'Tiêu diệt Goblin King 10 lần và Dark Lord 5 lần'
+          description: 'Tiêu diệt Goblin King 10 lần và Dark Lord 5 lần',
         },
       },
     ];
@@ -462,14 +527,20 @@ export class TitlesService {
   }
 
   // Send title to user by username
-  async sendTitleToUser(titleId: number, username: string, reason?: string): Promise<UserTitle> {
+  async sendTitleToUser(
+    titleId: number,
+    username: string,
+    reason?: string,
+  ): Promise<UserTitle> {
     // Find user by username
     const user = await this.userRepository.findOne({
       where: { username },
     });
 
     if (!user) {
-      throw new NotFoundException(`User với username "${username}" không tồn tại`);
+      throw new NotFoundException(
+        `User với username "${username}" không tồn tại`,
+      );
     }
 
     // Find title
@@ -487,7 +558,9 @@ export class TitlesService {
     });
 
     if (existingUserTitle) {
-      throw new BadRequestException(`User "${username}" đã có danh hiệu "${title.name}"`);
+      throw new BadRequestException(
+        `User "${username}" đã có danh hiệu "${title.name}"`,
+      );
     }
 
     // Create user title
@@ -499,7 +572,7 @@ export class TitlesService {
     });
 
     const savedUserTitle = await this.userTitleRepository.save(userTitle);
-    
+
     // Return with relations
     return this.userTitleRepository.findOne({
       where: { id: savedUserTitle.id },

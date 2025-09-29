@@ -99,7 +99,9 @@ export class TitlesController {
   }
 
   @Post('check-and-unlock')
-  @ApiOperation({ summary: 'Kiểm tra và mở khóa tất cả danh hiệu đủ điều kiện' })
+  @ApiOperation({
+    summary: 'Kiểm tra và mở khóa tất cả danh hiệu đủ điều kiện',
+  })
   @ApiResponse({
     status: 200,
     description: 'Danh sách danh hiệu mới được mở khóa',
@@ -173,7 +175,11 @@ export class TitlesController {
     @Param('titleId') titleId: number,
     @Body() body: { source?: string },
   ): Promise<UserTitle> {
-    return this.titlesService.unlockTitle(userId, titleId, body.source || 'Admin grant');
+    return this.titlesService.unlockTitle(
+      userId,
+      titleId,
+      body.source || 'Admin grant',
+    );
   }
 
   @Post('admin/send-to-user')
@@ -187,7 +193,11 @@ export class TitlesController {
   async sendTitleToUser(
     @Body() body: { titleId: number; username: string; reason?: string },
   ): Promise<UserTitle> {
-    return this.titlesService.sendTitleToUser(body.titleId, body.username, body.reason);
+    return this.titlesService.sendTitleToUser(
+      body.titleId,
+      body.username,
+      body.reason,
+    );
   }
 
   @Post('admin/initialize')

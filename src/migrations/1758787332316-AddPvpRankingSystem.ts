@@ -155,11 +155,21 @@ export class AddPvpRankingSystem1758787332316 implements MigrationInterface {
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     // Drop foreign key constraints first
-    await queryRunner.query(`ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_seasonId"`);
-    await queryRunner.query(`ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_defenderId"`);
-    await queryRunner.query(`ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_challengerId"`);
-    await queryRunner.query(`ALTER TABLE "pvp_rankings" DROP CONSTRAINT "FK_pvp_rankings_seasonId"`);
-    await queryRunner.query(`ALTER TABLE "pvp_rankings" DROP CONSTRAINT "FK_pvp_rankings_userId"`);
+    await queryRunner.query(
+      `ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_seasonId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_defenderId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "pvp_matches_new" DROP CONSTRAINT "FK_pvp_matches_new_challengerId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "pvp_rankings" DROP CONSTRAINT "FK_pvp_rankings_seasonId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "pvp_rankings" DROP CONSTRAINT "FK_pvp_rankings_userId"`,
+    );
 
     // Drop indexes
     await queryRunner.query(`DROP INDEX "IDX_pvp_matches_new_season_date"`);

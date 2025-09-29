@@ -289,7 +289,11 @@ export class GuildController {
     @Param('guildId') guildId: number,
     @Body() body: { level: number; experience?: number },
   ): Promise<Guild> {
-    return await this.guildService.resetGuildLevel(guildId, body.level, body.experience || 0);
+    return await this.guildService.resetGuildLevel(
+      guildId,
+      body.level,
+      body.experience || 0,
+    );
   }
 
   @Get('admin/all')

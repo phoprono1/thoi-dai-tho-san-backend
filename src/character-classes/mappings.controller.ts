@@ -17,7 +17,7 @@ import { CreateMappingDto, UpdateMappingDto } from './character-class.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 
-@Controller('admin/character-classes/:fromClassId/mappings')
+@Controller('admin/character-class-mappings/:fromClassId')
 export class MappingsController {
   constructor(
     private readonly characterClassService: CharacterClassService,
@@ -39,35 +39,6 @@ export class MappingsController {
   ) {
     const mapping = this.mappingRepo.create({ fromClassId, ...dto });
     return this.mappingRepo.save(mapping);
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Put(':id')
-  async update(
-    @Param('fromClassId', ParseIntPipe) fromClassId: number,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateMappingDto,
-  ) {
-    const mapping = await this.mappingRepo.findOne({
-      where: { id, fromClassId },
-    });
-    if (!mapping) throw new Error('Mapping not found');
-    Object.assign(mapping, dto);
-    return this.mappingRepo.save(mapping);
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Delete(':id')
-  async remove(
-    @Param('fromClassId', ParseIntPipe) fromClassId: number,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    const mapping = await this.mappingRepo.findOne({
-      where: { id, fromClassId },
-    });
-    if (!mapping) throw new Error('Mapping not found');
-    await this.mappingRepo.remove(mapping);
-    return { success: true };
   }
 
   // Bulk normalize mappings (expects body: { mappings: [{ id, weight, ... }] })
@@ -94,5 +65,61 @@ export class MappingsController {
       }
     }
     return { success: true, updated: results.length, results };
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Put(':id')
+  async update(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateMappingDto,
+  ) {
+    console.log('Update mapping request:', {
+      fromClassId,
+      id,
+      dto: JSON.stringify(dto, null, 2),
+    });
+
+    const mapping = await this.mappingRepo.findOne({
+      where: { id, fromClassId },
+    });
+    if (!mapping) throw new Error('Mapping not found');
+
+    console.log(
+      'Current mapping before update:',
+      JSON.stringify(mapping, null, 2),
+    );
+
+    Object.assign(mapping, dto);
+
+    // Force TypeORM to detect JSONB changes
+    if (dto.requirements) {
+      mapping.requirements = { ...dto.requirements };
+    }
+
+    console.log(
+      'Mapping after Object.assign:',
+      JSON.stringify(mapping, null, 2),
+    );
+
+    const saved = await this.mappingRepo.save(mapping);
+
+    console.log('Saved mapping:', JSON.stringify(saved, null, 2));
+
+    return saved;
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Delete(':id')
+  async remove(
+    @Param('fromClassId', ParseIntPipe) fromClassId: number,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const mapping = await this.mappingRepo.findOne({
+      where: { id, fromClassId },
+    });
+    if (!mapping) throw new Error('Mapping not found');
+    await this.mappingRepo.remove(mapping);
+    return { success: true };
   }
 }
