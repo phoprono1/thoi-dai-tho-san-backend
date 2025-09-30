@@ -91,26 +91,28 @@ export class UploadsController {
       const sharpModule = await import('sharp');
       // sharpModule may be a function (CJS), or an object with .default (ESM). Normalize:
 
-      const sharpLib: any = (sharpModule &&
+      const sharpLibAny: any = (sharpModule &&
         (sharpModule.default ?? sharpModule)) as any;
-      if (typeof sharpLib !== 'function') {
+      if (typeof sharpLibAny !== 'function') {
         console.warn('Sharp import did not return a callable function', {
-          typeofSharp: typeof sharpLib,
+          typeofSharp: typeof sharpLibAny,
           sharpModuleKeys: Object.keys(sharpModule || {}),
           file: originalPath,
         });
         return { path: rel };
       }
+
+      const sharpInstance = sharpLibAny as any;
       // If uploaded file is AVIF but this sharp build lacks AVIF input support,
       // bail early with a helpful warning so the admin knows why thumbnails are missing.
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
-        (sharpLib.format &&
-          sharpLib.format.avif &&
-          sharpLib.format.avif.input) ||
-          (sharpLib.format &&
-            sharpLib.format.heif &&
-            sharpLib.format.heif.input),
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
       );
       if (ext.endsWith('.avif') && !avifSupported) {
         console.warn(
@@ -124,11 +126,52 @@ export class UploadsController {
           warning: 'AVIF not supported by server; thumbnails not generated',
         };
       }
-      await sharpLib(originalPath)
+
+      // Detect animated/multi-page inputs (GIF, animated WebP, etc.). If animated,
+      // libvips/sharp may flatten to the first frame when resizing. As a safe fallback
+      // we preserve the original animated file into the thumbs folder so animation isn't lost.
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+        if (isAnimated) {
+          // Copy original into thumbs using original extension so animation is preserved
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${base}_64${origExt}`;
+            const mediumOrigName = `${base}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/monsters/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/monsters/thumbs/${mediumOrigName}`;
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file into thumbs:', {
+              error: String(copyErr),
+            });
+            // Fall through to attempt normal resizing (best-effort)
+          }
+        }
+      } catch (mErr) {
+        // If metadata fails for some reason, log and continue with normal resize attempt
+        console.warn('Failed to read metadata for thumbnail decision:', {
+          error: String(mErr),
+        });
+      }
+
+      await sharpInstance(originalPath)
         .resize(64, 64, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, smallName));
-      await sharpLib(originalPath)
+      await sharpInstance(originalPath)
         .resize(256, 256, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, mediumName));
@@ -182,25 +225,26 @@ export class UploadsController {
       const smallName = `${base}_64.webp`;
       const mediumName = `${base}_256.webp`;
       const sharpModule = await import('sharp');
-
-      const sharpLib: any = (sharpModule &&
+      const sharpLibAny: any = (sharpModule &&
         (sharpModule.default ?? sharpModule)) as any;
-      if (typeof sharpLib !== 'function') {
+      if (typeof sharpLibAny !== 'function') {
         console.warn('Sharp import did not return a callable function', {
-          typeofSharp: typeof sharpLib,
+          typeofSharp: typeof sharpLibAny,
           sharpModuleKeys: Object.keys(sharpModule || {}),
           file: originalPath,
         });
         return { path: rel };
       }
+
+      const sharpInstance = sharpLibAny as any;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
-        (sharpLib.format &&
-          sharpLib.format.avif &&
-          sharpLib.format.avif.input) ||
-          (sharpLib.format &&
-            sharpLib.format.heif &&
-            sharpLib.format.heif.input),
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
       );
       if (ext.endsWith('.avif') && !avifSupported) {
         console.warn(
@@ -214,11 +258,46 @@ export class UploadsController {
           warning: 'AVIF not supported by server; thumbnails not generated',
         };
       }
-      await sharpLib(originalPath)
+
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+        if (isAnimated) {
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${base}_64${origExt}`;
+            const mediumOrigName = `${base}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/dungeons/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/dungeons/thumbs/${mediumOrigName}`;
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file into thumbs:', {
+              error: String(copyErr),
+            });
+          }
+        }
+      } catch (mErr) {
+        console.warn('Failed to read metadata for thumbnail decision:', {
+          error: String(mErr),
+        });
+      }
+
+      await sharpInstance(originalPath)
         .resize(64, 64, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, smallName));
-      await sharpLib(originalPath)
+      await sharpInstance(originalPath)
         .resize(256, 256, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, mediumName));
@@ -271,25 +350,26 @@ export class UploadsController {
       const smallName = `${base}_64.webp`;
       const mediumName = `${base}_256.webp`;
       const sharpModule = await import('sharp');
-
-      const sharpLib: any = (sharpModule &&
+      const sharpLibAny: any = (sharpModule &&
         (sharpModule.default ?? sharpModule)) as any;
-      if (typeof sharpLib !== 'function') {
+      if (typeof sharpLibAny !== 'function') {
         console.warn('Sharp import did not return a callable function', {
-          typeofSharp: typeof sharpLib,
+          typeofSharp: typeof sharpLibAny,
           sharpModuleKeys: Object.keys(sharpModule || {}),
           file: originalPath,
         });
         return { path: rel };
       }
+
+      const sharpInstance = sharpLibAny as any;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
-        (sharpLib.format &&
-          sharpLib.format.avif &&
-          sharpLib.format.avif.input) ||
-          (sharpLib.format &&
-            sharpLib.format.heif &&
-            sharpLib.format.heif.input),
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
       );
       if (ext.endsWith('.avif') && !avifSupported) {
         console.warn(
@@ -303,11 +383,55 @@ export class UploadsController {
           warning: 'AVIF not supported by server; thumbnails not generated',
         };
       }
-      await sharpLib(originalPath)
+
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+        if (isAnimated) {
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${base}_64${origExt}`;
+            const mediumOrigName = `${base}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/items/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/items/thumbs/${mediumOrigName}`;
+            // Persist medium thumbnail to item record so clients don't need to PATCH separately
+            try {
+              await this.itemsService.update(+id, { image: mediumRel } as any);
+            } catch (e) {
+              console.warn('Failed to persist item image after upload', {
+                id,
+                error: e,
+              });
+            }
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file into thumbs:', {
+              error: String(copyErr),
+            });
+          }
+        }
+      } catch (mErr) {
+        console.warn('Failed to read metadata for thumbnail decision:', {
+          error: String(mErr),
+        });
+      }
+
+      await sharpInstance(originalPath)
         .resize(64, 64, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, smallName));
-      await sharpLib(originalPath)
+      await sharpInstance(originalPath)
         .resize(256, 256, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, mediumName));
@@ -374,22 +498,27 @@ export class UploadsController {
       const smallName = `${name}_64.webp`;
       const mediumName = `${name}_256.webp`;
 
-      // Try to generate thumbnails
-      const sharpLib = await import('sharp');
-      if (!sharpLib || !sharpLib.default) {
-        console.warn('Sharp not available for world boss thumbnails');
+      const sharpModule = await import('sharp');
+      const sharpLibAny: any = (sharpModule &&
+        (sharpModule.default ?? sharpModule)) as any;
+      if (typeof sharpLibAny !== 'function') {
+        console.warn('Sharp import did not return a callable function', {
+          typeofSharp: typeof sharpLibAny,
+          sharpModuleKeys: Object.keys(sharpModule || {}),
+          file: originalPath,
+        });
         return { path: rel };
       }
 
-      // Check AVIF support
+      const sharpInstance = sharpLibAny as any;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
-        (sharpLib.format &&
-          sharpLib.format.avif &&
-          sharpLib.format.avif.input) ||
-          (sharpLib.format &&
-            sharpLib.format.heif &&
-            sharpLib.format.heif.input),
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
       );
 
       if (ext.endsWith('.avif') && !avifSupported) {
@@ -403,14 +532,46 @@ export class UploadsController {
         };
       }
 
-      await sharpLib
-        .default(originalPath)
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+        if (isAnimated) {
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${name}_64${origExt}`;
+            const mediumOrigName = `${name}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/world-boss/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/world-boss/thumbs/${mediumOrigName}`;
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file into thumbs:', {
+              error: String(copyErr),
+            });
+          }
+        }
+      } catch (mErr) {
+        console.warn('Failed to read metadata for thumbnail decision:', {
+          error: String(mErr),
+        });
+      }
+
+      await sharpInstance(originalPath)
         .resize(64, 64, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, smallName));
 
-      await sharpLib
-        .default(originalPath)
+      await sharpInstance(originalPath)
         .resize(256, 256, { fit: 'cover' })
         .webp({ quality: 80 })
         .toFile(join(thumbsDir, mediumName));
