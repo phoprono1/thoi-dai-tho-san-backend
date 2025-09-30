@@ -153,17 +153,43 @@ export class ItemsService {
       };
     }
 
-    const result = await this.itemsRepository.delete(id);
-    if (result.affected && result.affected > 0) {
-      return {
-        success: true,
-        message: 'Item deleted successfully',
-      };
-    } else {
-      return {
-        success: false,
-        message: 'Item not found',
-      };
+    // If this item is a gacha box mapping, delete the gacha box as well
+    const item = await this.findOne(id);
+    if (!item) {
+      return { success: false, message: 'Item not found' };
+    }
+
+    try {
+      // Use a transaction so both deletes happen atomically
+      const queryRunner =
+        this.itemsRepository.manager.connection.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      try {
+        if (item.gachaBoxId) {
+          // Delete the gacha box; cascade relations are handled by DB/module
+          await queryRunner.manager.delete('gacha_box', {
+            id: item.gachaBoxId,
+          } as any);
+        }
+
+        const result = await queryRunner.manager.delete('item', { id } as any);
+        await queryRunner.commitTransaction();
+
+        if (result.affected && result.affected > 0) {
+          return { success: true, message: 'Item deleted successfully' };
+        } else {
+          return { success: false, message: 'Item not found' };
+        }
+      } catch (err) {
+        await queryRunner.rollbackTransaction();
+        throw err;
+      } finally {
+        await queryRunner.release();
+      }
+    } catch (err) {
+      console.error('Failed to delete item and linked gacha box:', err);
+      return { success: false, message: 'Internal error while deleting item' };
     }
   }
 }

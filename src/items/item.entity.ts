@@ -87,6 +87,9 @@ export class Item {
   @Column({ type: 'text', nullable: true })
   image?: string; // relative path or URL to item image (e.g. /assets/items/1.png)
 
+  @Column({ name: 'gacha_box_id', type: 'int', nullable: true })
+  gachaBoxId?: number;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -42,6 +42,7 @@ import { MarketModule } from './market/market.module';
 import { ExploreModule } from './explore/explore.module';
 import { UserAttributesModule } from './user-attributes/user-attributes.module';
 import { SkillModule } from './player-skills/skill.module';
+import { GachaModule } from './gacha/gacha.module';
 
 // ServeStatic DynamicModule instance for serving backend/assets at /assets
 // Narrow ts-ignore to the known interop call only
@@ -128,6 +129,7 @@ const ServeStaticDynamic: DynamicModule =
     QuestModule,
     MonsterModule,
     UploadsModule,
+    GachaModule,
     AdminImportModule,
     AdminModule,
     MarketModule,

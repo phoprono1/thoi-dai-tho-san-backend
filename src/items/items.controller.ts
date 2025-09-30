@@ -9,6 +9,7 @@ import {
   HttpException,
   HttpStatus,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,11 +25,22 @@ import {
   ClassType,
   ClassTier,
 } from '../character-classes/character-class.entity';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import {
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { CurrentUser } from '../common/current-user.decorator';
+import { User } from '../users/user.entity';
+import { UserItemsService } from '../user-items/user-items.service';
 
 @ApiTags('items')
 @Controller('items')
 export class ItemsController {
-  constructor(private readonly itemsService: ItemsService) {}
+  constructor(
+    private readonly itemsService: ItemsService,
+    private readonly userItemsService: UserItemsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách tất cả items' })
@@ -361,5 +373,35 @@ export class ItemsController {
       message: 'Sample items created successfully',
       items: createdItems,
     };
+  }
+  @Post('sell')
+  @UseGuards(JwtAuthGuard)
+  async sellItem(
+    @CurrentUser() user: User,
+    @Body() body: { userItemId: number; quantity?: number },
+  ): Promise<{ goldReceived: number; newGoldBalance: number }> {
+    if (!body || !body.userItemId) {
+      throw new BadRequestException('userItemId is required');
+    }
+
+    const qty = Math.max(1, Number(body.quantity) || 1);
+    try {
+      return await this.userItemsService.sellItem(
+        user.id,
+        body.userItemId,
+        qty,
+      );
+    } catch (err: unknown) {
+      // Log full error for debugging
+      console.error('Error in POST /items/sell:', err);
+      const getMessage = (e: unknown) => {
+        if (!e) return 'Failed to sell item';
+        if (typeof e === 'string') return e;
+        if (typeof e === 'object' && e && 'message' in e)
+          return (e as { message?: unknown }).message as string;
+        return 'Failed to sell item';
+      };
+      throw new InternalServerErrorException(getMessage(err));
+    }
   }
 }

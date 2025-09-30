@@ -436,6 +436,7 @@ export class UserItemsService {
       // UpdateQueryBuilder can't resolve relation aliases (error seen in logs).
       // Instead, find currently equipped items for the user, filter by item.type
       // and save the updated entities.
+
       const currentlyEquipped = await this.userItemsRepository.find({
         where: { userId: userItem.userId, isEquipped: true },
         relations: ['item'],
@@ -465,6 +466,79 @@ export class UserItemsService {
       where: { userId, isEquipped: true },
       relations: ['item', 'item.itemSet'],
     });
+  }
+
+  /**
+   * Sell user item to the system (quick-sell).
+   * Decrements or removes the user_item and credits user.gold in a single transaction.
+   * Returns { goldReceived, newGoldBalance }.
+   */
+  async sellItem(
+    userId: number,
+    userItemId: number,
+    quantity: number = 1,
+  ): Promise<{ goldReceived: number; newGoldBalance: number }> {
+    if (quantity <= 0) {
+      throw new BadRequestException('Quantity must be >= 1');
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Lock the user_item row for update to prevent concurrent sells
+      const userItem = await queryRunner.manager
+        .createQueryBuilder(UserItem, 'ui')
+        .setLock('pessimistic_write')
+        .innerJoinAndSelect('ui.item', 'item')
+        .where('ui.id = :id', { id: userItemId })
+        .getOne();
+
+      if (!userItem || userItem.userId !== userId) {
+        throw new BadRequestException('User item not found');
+      }
+
+      if (userItem.quantity < quantity) {
+        throw new BadRequestException('Not enough quantity to sell');
+      }
+
+      const item = userItem.item as Item;
+      if (!item) {
+        throw new BadRequestException('Associated item not found');
+      }
+
+      // Use full item.price as unit price for now
+      const unitPrice = item.price || 0;
+      const goldReceived = unitPrice * quantity;
+
+      // Update or delete user_item
+      if (userItem.quantity === quantity) {
+        await queryRunner.manager.delete(UserItem, { id: userItem.id });
+      } else {
+        await queryRunner.manager.update(
+          UserItem,
+          { id: userItem.id },
+          { quantity: userItem.quantity - quantity },
+        );
+      }
+
+      // Credit user gold (use usersRepository for typed operations)
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+      });
+      if (!user) throw new BadRequestException('User not found');
+      const newGold = (user.gold || 0) + goldReceived;
+      await queryRunner.manager.update(User, { id: userId }, { gold: newGold });
+
+      await queryRunner.commitTransaction();
+
+      return { goldReceived, newGoldBalance: newGold };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   // ===== CONSUMABLE ITEMS SYSTEM =====
@@ -862,7 +936,7 @@ export class UserItemsService {
     }
 
     // Apply permanent stat increases
-    const statBoosts: any = {};
+    const statBoosts: Record<string, number> = {};
 
     if (item.stats.strength) {
       userStats.strength += item.stats.strength;
@@ -916,7 +990,7 @@ export class UserItemsService {
       );
     }
 
-    const boostMessages = Object.entries(statBoosts)
+    const boostMessages = (Object.entries(statBoosts) as [string, number][])
       .map(([stat, value]) => `${stat}: +${value}`)
       .join(', ');
 

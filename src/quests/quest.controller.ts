@@ -76,6 +76,16 @@ export class QuestController {
     return result;
   }
 
+  // Public endpoint to fetch a single quest by id (useful for resolving names)
+  @Get(':id')
+  async getQuestById(@Param('id', ParseIntPipe) id: number) {
+    const q = await this.questService.getQuestById(id);
+    if (!q) {
+      return { status: 404, message: 'Quest not found' };
+    }
+    return q;
+  }
+
   @UseGuards(JwtAuthGuard)
   @Post(':id/update-progress')
   async updateQuestProgress(
