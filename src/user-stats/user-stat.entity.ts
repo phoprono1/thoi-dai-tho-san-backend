@@ -61,6 +61,13 @@ export class UserStat {
   @Column({ default: 0 })
   luckPoints: number; // Điểm LUK đã invest
 
+  // Skill Points System
+  @Column({ default: 0 })
+  availableSkillPoints: number; // Điểm kỹ năng có thể sử dụng
+
+  @Column({ default: 0 })
+  totalSkillPointsEarned: number; // Tổng điểm kỹ năng đã nhận
+
   @CreateDateColumn()
   createdAt: Date;
 

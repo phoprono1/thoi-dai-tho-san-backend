@@ -374,7 +374,8 @@ export class UserStatsService {
     if (missingPoints <= 0) {
       return {
         success: false,
-        message: 'No missing attribute points detected. Your points are correct.',
+        message:
+          'No missing attribute points detected. Your points are correct.',
       };
     }
 
@@ -382,9 +383,21 @@ export class UserStatsService {
     userStats.unspentAttributePoints += missingPoints;
     await this.userStatsRepository.save(userStats);
 
+    // Also recalculate skill points
+    const skillPointsResult = await this.recalculateSkillPoints(userId);
+
+    const messages: string[] = [
+      `Successfully granted ${missingPoints} missing attribute points`,
+    ];
+    if (skillPointsResult.success && skillPointsResult.pointsGranted) {
+      messages.push(
+        `and ${skillPointsResult.pointsGranted} missing skill points`,
+      );
+    }
+
     return {
       success: true,
-      message: `Successfully granted ${missingPoints} missing attribute points`,
+      message: messages.join(' '),
       pointsGranted: missingPoints,
     };
   }
@@ -588,6 +601,97 @@ export class UserStatsService {
       dex: totalDex,
       vit: totalVit,
       luk: totalLuk,
+    };
+  }
+
+  /**
+   * Grant skill points to user (called on level up)
+   */
+  async grantSkillPoints(userId: number, points: number): Promise<void> {
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      throw new Error('User stats not found');
+    }
+
+    userStats.availableSkillPoints += points;
+    userStats.totalSkillPointsEarned += points;
+    await this.userStatsRepository.save(userStats);
+  }
+
+  /**
+   * Deduct skill points from user (called on unlock/level up skill)
+   */
+  async deductSkillPoints(userId: number, points: number): Promise<void> {
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      throw new Error('User stats not found');
+    }
+
+    if (userStats.availableSkillPoints < points) {
+      throw new Error(
+        `Not enough skill points. Required: ${points}, Available: ${userStats.availableSkillPoints}`,
+      );
+    }
+
+    userStats.availableSkillPoints -= points;
+    await this.userStatsRepository.save(userStats);
+  }
+
+  /**
+   * Get available skill points for user
+   */
+  async getAvailableSkillPoints(userId: number): Promise<number> {
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      return 0;
+    }
+    return userStats.availableSkillPoints;
+  }
+
+  /**
+   * Recalculate and grant skill points for users who leveled up (compensation)
+   */
+  async recalculateSkillPoints(
+    userId: number,
+  ): Promise<{ success: boolean; message: string; pointsGranted?: number }> {
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      return { success: false, message: 'User stats not found' };
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+    });
+    if (!user) {
+      return { success: false, message: 'User not found' };
+    }
+
+    // Expected total skill points: (level - 1)
+    const expectedTotalPoints = Math.max(0, user.level - 1);
+
+    // Current total = earned points
+    const currentTotalPoints = userStats.totalSkillPointsEarned;
+
+    // Missing points
+    const missingPoints = expectedTotalPoints - currentTotalPoints;
+
+    if (missingPoints <= 0) {
+      return {
+        success: false,
+        message:
+          'No missing skill points detected. Your skill points are correct.',
+      };
+    }
+
+    // Grant missing points
+    userStats.availableSkillPoints += missingPoints;
+    userStats.totalSkillPointsEarned += missingPoints;
+    await this.userStatsRepository.save(userStats);
+
+    return {
+      success: true,
+      message: `Successfully granted ${missingPoints} missing skill points`,
+      pointsGranted: missingPoints,
     };
   }
 }

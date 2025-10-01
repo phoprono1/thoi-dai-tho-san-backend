@@ -316,7 +316,7 @@ export class UsersService {
       // Tăng level và trừ experience cần thiết
       user.level += 1;
       user.experience -= nextLevel.experienceRequired;
-      
+
       // Accumulate attribute points from this level's reward
       totalAttributePointsToGrant += nextLevel.attributePointsReward || 0;
 
@@ -329,6 +329,8 @@ export class UsersService {
     if (user.level === originalLevel) {
       throw new Error('Not enough experience to level up');
     }
+
+    const levelsGained = user.level - originalLevel;
 
     // Grant accumulated attribute points from all levels gained
     if (totalAttributePointsToGrant > 0) {
@@ -343,6 +345,20 @@ export class UsersService {
       } catch (err) {
         this.logger.error(
           `Failed to grant attribute points on level up: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Grant skill points (1 per level gained)
+    if (levelsGained > 0) {
+      try {
+        await this.userStatsService.grantSkillPoints(user.id, levelsGained);
+        this.logger.log(
+          `Granted ${levelsGained} skill points to user ${user.id} (leveled from ${originalLevel} to ${user.level})`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to grant skill points on level up: ${(err as Error).message}`,
         );
       }
     }

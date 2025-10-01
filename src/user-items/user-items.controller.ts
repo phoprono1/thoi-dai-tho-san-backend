@@ -6,6 +6,8 @@ import {
   Param,
   Put,
   Delete,
+  UseGuards,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,20 +18,23 @@ import {
 } from '@nestjs/swagger';
 import { UserItemsService } from './user-items.service';
 import { UserItem } from './user-item.entity';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('user-items')
 @Controller('user-items')
+@UseGuards(JwtAuthGuard)
 export class UserItemsController {
   constructor(private readonly userItemsService: UserItemsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Lấy danh sách tất cả user items' })
+  @ApiOperation({ summary: 'Lấy danh sách items của người chơi hiện tại' })
   @ApiResponse({
     status: 200,
-    description: 'Danh sách user items',
+    description: 'Danh sách items của người chơi hiện tại',
   })
-  findAll(): Promise<UserItem[]> {
-    return this.userItemsService.findAll();
+  findMyItems(@Request() req: any): Promise<UserItem[]> {
+    const userId = req.user.id as number;
+    return this.userItemsService.findByUserId(userId);
   }
 
   @Get(':id')

@@ -123,6 +123,7 @@ export class SkillDefinitionService {
     if (data.isActive !== undefined) skill.isActive = data.isActive;
     if (data.sortOrder !== undefined) skill.sortOrder = data.sortOrder;
     if (data.category !== undefined) skill.category = data.category;
+    if (data.image !== undefined) skill.image = data.image; // Support image upload
 
     return this.skillDefinitionRepository.save(skill);
   }

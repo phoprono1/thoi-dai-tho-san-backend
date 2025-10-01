@@ -23,6 +23,7 @@ import { CombatActorInput } from '../combat-engine/types';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
 import { MailboxService } from '../mailbox/mailbox.service';
 import { MailType } from '../mailbox/mailbox.entity';
+import { SkillService } from '../player-skills/skill.service';
 
 @Injectable()
 export class PvpRankingService {
@@ -38,6 +39,7 @@ export class PvpRankingService {
     private userRepository: Repository<User>,
     private userStatsService: UserStatsService,
     private mailboxService: MailboxService,
+    private skillService: SkillService,
   ) {}
 
   // Get current active season
@@ -148,6 +150,18 @@ export class PvpRankingService {
       throw new BadRequestException('You cannot challenge yourself');
     }
 
+    // Get full user entities with level information
+    const challengerUser = await this.userRepository.findOne({
+      where: { id: challengerId },
+    });
+    const defenderUser = await this.userRepository.findOne({
+      where: { id: defenderId },
+    });
+
+    if (!challengerUser || !defenderUser) {
+      throw new BadRequestException('One or more users not found');
+    }
+
     // Get user stats for combat
     const challengerStats =
       await this.userStatsService.getTotalStatsWithAllBonuses(challengerId);
@@ -171,12 +185,92 @@ export class PvpRankingService {
       luck: defenderStats.luk,
     });
 
+    // Get challenger's active skills
+    const challengerSkills =
+      await this.skillService.getPlayerSkills(challengerId);
+    console.log(
+      `🔍 [PvP] Challenger ${challengerId} (${challengerRanking.user.username}) has ${challengerSkills.length} total skills`,
+    );
+
+    const challengerActiveSkills = challengerSkills
+      .filter((ps) => {
+        if (!ps.skillDefinition) {
+          console.warn(
+            `⚠️ PlayerSkill ${ps.id} has no skillDefinition relation!`,
+          );
+          return false;
+        }
+        return ps.skillDefinition.skillType === 'active';
+      })
+      .map((ps) => ({
+        id: ps.skillDefinition.skillId,
+        name: ps.skillDefinition.name,
+        skillType: ps.skillDefinition.skillType,
+        manaCost: ps.skillDefinition.manaCost,
+        cooldown: ps.skillDefinition.cooldown,
+        targetType: ps.skillDefinition.targetType,
+        damageType: ps.skillDefinition.damageType,
+        damageFormula: ps.skillDefinition.damageFormula,
+        healingFormula: ps.skillDefinition.healingFormula,
+        effects: ps.skillDefinition.effects,
+        level: ps.level,
+      }));
+
+    console.log(
+      `✅ [PvP] Challenger ${challengerId} has ${challengerActiveSkills.length} active skills:`,
+      challengerActiveSkills.map((s) => s.name),
+    );
+
+    // Get defender's active skills
+    const defenderSkills = await this.skillService.getPlayerSkills(defenderId);
+    console.log(
+      `🔍 [PvP] Defender ${defenderId} (${defenderRanking.user.username}) has ${defenderSkills.length} total skills`,
+    );
+
+    const defenderActiveSkills = defenderSkills
+      .filter((ps) => {
+        if (!ps.skillDefinition) {
+          console.warn(
+            `⚠️ PlayerSkill ${ps.id} has no skillDefinition relation!`,
+          );
+          return false;
+        }
+        return ps.skillDefinition.skillType === 'active';
+      })
+      .map((ps) => ({
+        id: ps.skillDefinition.skillId,
+        name: ps.skillDefinition.name,
+        skillType: ps.skillDefinition.skillType,
+        manaCost: ps.skillDefinition.manaCost,
+        cooldown: ps.skillDefinition.cooldown,
+        targetType: ps.skillDefinition.targetType,
+        damageType: ps.skillDefinition.damageType,
+        damageFormula: ps.skillDefinition.damageFormula,
+        healingFormula: ps.skillDefinition.healingFormula,
+        effects: ps.skillDefinition.effects,
+        level: ps.level,
+      }));
+
+    console.log(
+      `✅ [PvP] Defender ${defenderId} has ${defenderActiveSkills.length} active skills:`,
+      defenderActiveSkills.map((s) => s.name),
+    );
+
     // Prepare combat actors
     const challenger: CombatActorInput = {
       id: challengerId,
       name: challengerRanking.user.username,
       isPlayer: true,
       stats: challengerCombatStats,
+      skills: challengerActiveSkills,
+      skillCooldowns: {},
+      metadata: {
+        level: challengerUser.level,
+        attack: challengerCombatStats.attack,
+        defense: challengerCombatStats.defense,
+        speed: challengerCombatStats.speed || 100,
+        maxHp: challengerCombatStats.maxHp,
+      },
     };
 
     const defender: CombatActorInput = {
@@ -184,6 +278,15 @@ export class PvpRankingService {
       name: defenderRanking.user.username,
       isPlayer: false, // Treat as enemy for combat engine
       stats: defenderCombatStats,
+      skills: defenderActiveSkills,
+      skillCooldowns: {},
+      metadata: {
+        level: defenderUser.level,
+        attack: defenderCombatStats.attack,
+        defense: defenderCombatStats.defense,
+        speed: defenderCombatStats.speed || 100,
+        maxHp: defenderCombatStats.maxHp,
+      },
     };
 
     // Run combat

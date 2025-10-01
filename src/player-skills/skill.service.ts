@@ -147,6 +147,94 @@ export class SkillService {
       );
     }
 
+    // Check prerequisites (required skills)
+    if (
+      skillEntity.prerequisites &&
+      Array.isArray(skillEntity.prerequisites) &&
+      skillEntity.prerequisites.length > 0
+    ) {
+      const playerSkills = await this.getPlayerSkills(userId);
+      const unlockedSkillIds = new Set(
+        playerSkills.map((ps) => ps.skillDefinition.skillId),
+      );
+
+      // Check if all prerequisite skills are unlocked
+      const missingPrereqs: string[] = [];
+      for (const prereqSkillId of skillEntity.prerequisites) {
+        if (!unlockedSkillIds.has(prereqSkillId)) {
+          missingPrereqs.push(prereqSkillId);
+        }
+      }
+
+      if (missingPrereqs.length > 0) {
+        throw new BadRequestException(
+          `Missing required skills: ${missingPrereqs.join(', ')}. You must unlock these skills first.`,
+        );
+      }
+    }
+
+    // Check required skill levels (e.g., "fireball": 3 means fireball must be level 3+)
+    if (
+      skillEntity.requiredSkillLevels &&
+      typeof skillEntity.requiredSkillLevels === 'object'
+    ) {
+      const playerSkills = await this.getPlayerSkills(userId);
+      const playerSkillLevels = new Map(
+        playerSkills.map((ps) => [ps.skillDefinition.skillId, ps.level]),
+      );
+
+      const insufficientLevels: string[] = [];
+      for (const [reqSkillId, reqLevel] of Object.entries(
+        skillEntity.requiredSkillLevels,
+      )) {
+        const currentLevel = playerSkillLevels.get(reqSkillId) || 0;
+        const requiredLevelNum =
+          typeof reqLevel === 'number' ? reqLevel : Number(reqLevel);
+        if (currentLevel < requiredLevelNum) {
+          insufficientLevels.push(`${reqSkillId} (need level ${reqLevel})`);
+        }
+      }
+
+      if (insufficientLevels.length > 0) {
+        throw new BadRequestException(
+          `Insufficient skill levels: ${insufficientLevels.join(', ')}`,
+        );
+      }
+    }
+
+    // Check class restrictions
+    if (
+      skillEntity.classRestrictions &&
+      Array.isArray(skillEntity.classRestrictions) &&
+      skillEntity.classRestrictions.length > 0
+    ) {
+      const user = await this.userStatsService.findByUserId(userId);
+      const userClass = user?.user?.characterClass?.name;
+
+      if (
+        !userClass ||
+        !skillEntity.classRestrictions.includes(userClass.toLowerCase())
+      ) {
+        throw new BadRequestException(
+          `This skill is restricted to classes: ${skillEntity.classRestrictions.join(', ')}. Your class: ${userClass || 'none'}`,
+        );
+      }
+    }
+
+    // Check if user has enough skill points
+    const availablePoints =
+      await this.userStatsService.getAvailableSkillPoints(userId);
+    const requiredPoints = skillDefinition.skillPointCost || 1;
+
+    if (availablePoints < requiredPoints) {
+      throw new BadRequestException(
+        `Not enough skill points. Required: ${requiredPoints}, Available: ${availablePoints}`,
+      );
+    }
+
+    // Deduct skill points
+    await this.userStatsService.deductSkillPoints(userId, requiredPoints);
+
     // Create player skill
     const playerSkill = this.playerSkillRepository.create({
       userId,
@@ -176,6 +264,20 @@ export class SkillService {
       );
     }
 
+    // Check if user has enough skill points to level up
+    const availablePoints =
+      await this.userStatsService.getAvailableSkillPoints(userId);
+    const requiredPoints = playerSkill.skillDefinition.skillPointCost || 1;
+
+    if (availablePoints < requiredPoints) {
+      throw new BadRequestException(
+        `Not enough skill points. Required: ${requiredPoints}, Available: ${availablePoints}`,
+      );
+    }
+
+    // Deduct skill points
+    await this.userStatsService.deductSkillPoints(userId, requiredPoints);
+
     // Level up
     playerSkill.level += 1;
     return this.playerSkillRepository.save(playerSkill);
@@ -183,7 +285,12 @@ export class SkillService {
 
   // Get player skill effects (for combat calculations)
   async getPlayerSkillEffects(userId: number) {
-    const playerSkills = await this.getPlayerSkills(userId);
+    // Only get EQUIPPED skills
+    const playerSkills = await this.playerSkillRepository.find({
+      where: { userId, isEquipped: true },
+      relations: ['skillDefinition'],
+      order: { unlockedAt: 'ASC' },
+    });
 
     const statBonuses = {
       attack: 0,
@@ -200,7 +307,7 @@ export class SkillService {
 
     const specialEffects: string[] = [];
 
-    // Calculate total effects from all skills
+    // Calculate total effects from all EQUIPPED skills
     for (const playerSkill of playerSkills) {
       const effects = playerSkill.getCurrentEffects();
       if (effects) {
@@ -223,6 +330,98 @@ export class SkillService {
     return {
       statBonuses,
       specialEffects,
+    };
+  }
+
+  // Equip/Unequip skills with slot limits
+  async equipSkill(userId: number, skillId: string): Promise<PlayerSkill> {
+    const playerSkill = await this.playerSkillRepository.findOne({
+      where: { userId, skillDefinition: { skillId } },
+      relations: ['skillDefinition'],
+    });
+
+    if (!playerSkill) {
+      throw new NotFoundException(`Skill '${skillId}' not found for user`);
+    }
+
+    if (playerSkill.isEquipped) {
+      throw new BadRequestException(`Skill '${skillId}' is already equipped`);
+    }
+
+    // Check slot limits based on skill type
+    const skillType = playerSkill.skillDefinition.skillType;
+    const equippedCount = await this.playerSkillRepository.count({
+      where: {
+        userId,
+        isEquipped: true,
+        skillDefinition: { skillType },
+      },
+    });
+
+    const slotLimits = {
+      passive: 3,
+      active: 4,
+      toggle: 2,
+    };
+
+    const limit = slotLimits[skillType] || 0;
+    if (equippedCount >= limit) {
+      throw new BadRequestException(
+        `Maximum ${limit} ${skillType} skills can be equipped. Please unequip another skill first.`,
+      );
+    }
+
+    playerSkill.isEquipped = true;
+    return this.playerSkillRepository.save(playerSkill);
+  }
+
+  async unequipSkill(userId: number, skillId: string): Promise<PlayerSkill> {
+    const playerSkill = await this.playerSkillRepository.findOne({
+      where: { userId, skillDefinition: { skillId } },
+      relations: ['skillDefinition'],
+    });
+
+    if (!playerSkill) {
+      throw new NotFoundException(`Skill '${skillId}' not found for user`);
+    }
+
+    if (!playerSkill.isEquipped) {
+      throw new BadRequestException(`Skill '${skillId}' is not equipped`);
+    }
+
+    playerSkill.isEquipped = false;
+    return this.playerSkillRepository.save(playerSkill);
+  }
+
+  // Get equipped skills count by type
+  async getEquippedSlotsInfo(userId: number) {
+    const equippedSkills = await this.playerSkillRepository.find({
+      where: { userId, isEquipped: true },
+      relations: ['skillDefinition'],
+    });
+
+    const slotLimits = {
+      passive: 3,
+      active: 4,
+      toggle: 2,
+    };
+
+    const equipped = {
+      passive: equippedSkills.filter(
+        (s) => s.skillDefinition.skillType === 'passive',
+      ).length,
+      active: equippedSkills.filter(
+        (s) => s.skillDefinition.skillType === 'active',
+      ).length,
+      toggle: equippedSkills.filter(
+        (s) => s.skillDefinition.skillType === 'toggle',
+      ).length,
+    };
+
+    return {
+      passive: { used: equipped.passive, max: slotLimits.passive },
+      active: { used: equipped.active, max: slotLimits.active },
+      toggle: { used: equipped.toggle, max: slotLimits.toggle },
     };
   }
 

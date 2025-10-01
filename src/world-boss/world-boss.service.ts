@@ -36,6 +36,7 @@ import { deriveCombatStats } from '../combat-engine/stat-converter';
 import { runCombat } from '../combat-engine/engine';
 import { CombatActorInput } from '../combat-engine/types';
 import { WorldBossGateway } from './world-boss.gateway';
+import { SkillService } from '../player-skills/skill.service';
 
 @Injectable()
 export class WorldBossService {
@@ -64,6 +65,7 @@ export class WorldBossService {
     @InjectRepository(Mailbox)
     private mailboxRepository: Repository<Mailbox>,
     private dataSource: DataSource,
+    private skillService: SkillService,
   ) {}
 
   // Inject gateway after construction to avoid circular dependency
@@ -237,6 +239,41 @@ export class WorldBossService {
     // Set current HP from UserStat
     playerStats.currentMana = playerStats.maxMana;
 
+    // Get user's active skills for combat
+    const userSkills = await this.skillService.getPlayerSkills(user.id);
+    console.log(
+      `🔍 [runBossCombat] User ${user.id} (${user.username}) has ${userSkills.length} total skills`,
+    );
+
+    const activeSkills = userSkills
+      .filter((ps) => {
+        if (!ps.skillDefinition) {
+          console.warn(
+            `⚠️ PlayerSkill ${ps.id} has no skillDefinition relation!`,
+          );
+          return false;
+        }
+        return ps.skillDefinition.skillType === 'active';
+      })
+      .map((ps) => ({
+        id: ps.skillDefinition.skillId,
+        name: ps.skillDefinition.name,
+        skillType: ps.skillDefinition.skillType,
+        manaCost: ps.skillDefinition.manaCost,
+        cooldown: ps.skillDefinition.cooldown,
+        targetType: ps.skillDefinition.targetType,
+        damageType: ps.skillDefinition.damageType,
+        damageFormula: ps.skillDefinition.damageFormula,
+        healingFormula: ps.skillDefinition.healingFormula,
+        effects: ps.skillDefinition.effects,
+        level: ps.level,
+      }));
+
+    console.log(
+      `✅ [runBossCombat] User ${user.id} has ${activeSkills.length} active skills:`,
+      activeSkills.map((s) => s.name),
+    );
+
     // Create boss combat stats
     const bossStats = deriveCombatStats({
       // Boss uses high base stats
@@ -257,6 +294,8 @@ export class WorldBossService {
       isPlayer: true,
       stats: playerStats,
       currentHp: playerStats.maxHp,
+      skills: activeSkills,
+      skillCooldowns: {},
     };
 
     const bossActor: CombatActorInput = {

@@ -80,4 +80,45 @@ export class SkillController {
     const userId = req.user.id;
     return this.skillService.getPlayerSkillEffects(userId);
   }
+
+  @Post('equip/:skillId')
+  @ApiOperation({ summary: 'Equip a skill' })
+  @ApiResponse({
+    status: 200,
+    description: 'Skill equipped successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Skill not found or slot limit reached',
+  })
+  async equipSkill(@Request() req, @Param('skillId') skillId: SkillId) {
+    const userId = req.user.id;
+    return this.skillService.equipSkill(userId, skillId);
+  }
+
+  @Post('unequip/:skillId')
+  @ApiOperation({ summary: 'Unequip a skill' })
+  @ApiResponse({
+    status: 200,
+    description: 'Skill unequipped successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Skill not found or not equipped',
+  })
+  async unequipSkill(@Request() req, @Param('skillId') skillId: SkillId) {
+    const userId = req.user.id;
+    return this.skillService.unequipSkill(userId, skillId);
+  }
+
+  @Get('slots')
+  @ApiOperation({ summary: 'Get equipped skill slots info' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipped slots information',
+  })
+  async getEquippedSlots(@Request() req) {
+    const userId = req.user.id;
+    return this.skillService.getEquippedSlotsInfo(userId);
+  }
 }

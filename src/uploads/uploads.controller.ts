@@ -18,6 +18,7 @@ import { MonsterService } from '../monsters/monster.service';
 import { DungeonsService } from '../dungeons/dungeons.service';
 import { ItemsService } from '../items/items.service';
 import { WorldBossService } from '../world-boss/world-boss.service';
+import { SkillDefinitionService } from '../player-skills/skill-definition.service';
 import { extname, join } from 'path';
 import * as fs from 'fs';
 import { parse } from 'path';
@@ -43,6 +44,7 @@ export class UploadsController {
     private dungeonsService: DungeonsService,
     private itemsService: ItemsService,
     private worldBossService: WorldBossService,
+    private skillDefinitionService: SkillDefinitionService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -588,6 +590,172 @@ export class UploadsController {
         error: String(err),
         file: String(file?.filename),
       });
+      return { path: rel };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('skills/:skillId')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const skillsDir = join(process.cwd(), 'assets', 'skills');
+          // Ensure skills directory exists
+          if (!fs.existsSync(skillsDir)) {
+            fs.mkdirSync(skillsDir, { recursive: true });
+          }
+          cb(null, skillsDir);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadSkillImage(
+    @Param('skillId') skillId: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/skills/${file.filename}`;
+    const originalPath = file.path;
+    const thumbsDir = join(process.cwd(), 'assets', 'skills', 'thumbs');
+
+    // Ensure thumbs directory exists
+    if (!fs.existsSync(thumbsDir)) {
+      fs.mkdirSync(thumbsDir, { recursive: true });
+    }
+
+    try {
+      const { name } = parse(file.filename);
+      const smallName = `${name}_64.webp`;
+      const mediumName = `${name}_256.webp`;
+
+      const sharpModule = await import('sharp');
+      const sharpLibAny: any = (sharpModule &&
+        (sharpModule.default ?? sharpModule)) as any;
+      if (typeof sharpLibAny !== 'function') {
+        console.warn('Sharp import did not return a callable function', {
+          typeofSharp: typeof sharpLibAny,
+          sharpModuleKeys: Object.keys(sharpModule || {}),
+          file: originalPath,
+        });
+        // Update skill definition even if thumbnail generation fails
+        await this.skillDefinitionService.updateSkillDefinition(skillId, {
+          image: rel,
+        } as any);
+        return { path: rel };
+      }
+
+      const sharpInstance = sharpLibAny as any;
+      const ext = String(file && file.filename).toLowerCase();
+      const avifSupported = Boolean(
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
+      );
+
+      if (ext.endsWith('.avif') && !avifSupported) {
+        console.warn(
+          'AVIF upload detected but AVIF input not supported by sharp build',
+          { file: originalPath },
+        );
+        await this.skillDefinitionService.updateSkillDefinition(skillId, {
+          image: rel,
+        } as any);
+        return {
+          path: rel,
+          warning: 'AVIF not supported by server; thumbnails not generated',
+        };
+      }
+
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+        if (isAnimated) {
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${name}_64${origExt}`;
+            const mediumOrigName = `${name}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/skills/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/skills/thumbs/${mediumOrigName}`;
+            // Update skill definition with medium thumbnail
+            await this.skillDefinitionService.updateSkillDefinition(skillId, {
+              image: mediumRel,
+            } as any);
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file into thumbs:', {
+              error: String(copyErr),
+            });
+          }
+        }
+      } catch (mErr) {
+        console.warn('Failed to read metadata for thumbnail decision:', {
+          error: String(mErr),
+        });
+      }
+
+      await sharpInstance(originalPath)
+        .resize(64, 64, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, smallName));
+
+      await sharpInstance(originalPath)
+        .resize(256, 256, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, mediumName));
+
+      const smallRel = `/assets/skills/thumbs/${smallName}`;
+      const mediumRel = `/assets/skills/thumbs/${mediumName}`;
+
+      // Update skill definition with medium thumbnail
+      await this.skillDefinitionService.updateSkillDefinition(skillId, {
+        image: mediumRel,
+      } as any);
+
+      return {
+        path: rel,
+        thumbnails: { small: smallRel, medium: mediumRel },
+      };
+    } catch (err) {
+      console.warn('Thumbnail generation failed for skill:', {
+        error: String(err),
+        file: String(file?.filename),
+      });
+      // Still update skill definition with original image
+      try {
+        await this.skillDefinitionService.updateSkillDefinition(skillId, {
+          image: rel,
+        } as any);
+      } catch (updateErr) {
+        console.warn('Failed to update skill definition:', {
+          skillId,
+          error: String(updateErr),
+        });
+      }
       return { path: rel };
     }
   }

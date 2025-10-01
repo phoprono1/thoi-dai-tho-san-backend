@@ -208,12 +208,23 @@ export class CombatResultsService {
     // Khởi tạo team stats - calculate maxHp from derived stats
     const teamMaxHpPromises = users.map(async (user) => {
       const coreAttrs = await this.calculateTotalCoreAttributes(user.id);
+      // Get passive skill bonuses
+      const skillEffects = await this.skillService.getPlayerSkillEffects(
+        user.id,
+      );
       const derivedStats = deriveCombatStats({
         baseAttack: 10,
         baseMaxHp: 100,
         baseDefense: 5,
         ...coreAttrs,
       });
+      // Apply skill bonuses to derived stats
+      derivedStats.attack += skillEffects.statBonuses.attack || 0;
+      derivedStats.defense += skillEffects.statBonuses.defense || 0;
+      derivedStats.maxHp += skillEffects.statBonuses.maxHp || 0;
+      derivedStats.critRate += skillEffects.statBonuses.critRate || 0;
+      derivedStats.critDamage += skillEffects.statBonuses.critDamage || 0;
+      derivedStats.dodgeRate += skillEffects.statBonuses.dodgeRate || 0;
       return derivedStats.maxHp;
     });
     const teamMaxHps = await Promise.all(teamMaxHpPromises);
@@ -556,12 +567,57 @@ export class CombatResultsService {
     // Prepare player and enemy inputs for engine
     const playerInputsPromises = users.map(async (u) => {
       const coreAttrs = await this.calculateTotalCoreAttributes(u.id);
+      // Get passive skill bonuses
+      const skillEffects = await this.skillService.getPlayerSkillEffects(u.id);
       const derivedStats = deriveCombatStats({
         baseAttack: 10,
         baseMaxHp: 100,
         baseDefense: 5,
         ...coreAttrs,
       });
+      // Apply skill bonuses to derived stats
+      derivedStats.attack += skillEffects.statBonuses.attack || 0;
+      derivedStats.defense += skillEffects.statBonuses.defense || 0;
+      derivedStats.maxHp += skillEffects.statBonuses.maxHp || 0;
+      derivedStats.critRate += skillEffects.statBonuses.critRate || 0;
+      derivedStats.critDamage += skillEffects.statBonuses.critDamage || 0;
+      derivedStats.dodgeRate += skillEffects.statBonuses.dodgeRate || 0;
+      derivedStats.accuracy += skillEffects.statBonuses.accuracy || 0;
+
+      // Get user's active skills
+      const userSkills = await this.skillService.getPlayerSkills(u.id);
+      console.log(
+        `🔍 [startCombatWithEnemies] User ${u.id} (${u.username}) has ${userSkills.length} total skills`,
+      );
+
+      const activeSkills = userSkills
+        .filter((ps) => {
+          if (!ps.skillDefinition) {
+            console.warn(
+              `⚠️ PlayerSkill ${ps.id} has no skillDefinition relation!`,
+            );
+            return false;
+          }
+          return ps.skillDefinition.skillType === 'active';
+        })
+        .map((ps) => ({
+          id: ps.skillDefinition.skillId,
+          name: ps.skillDefinition.name,
+          skillType: ps.skillDefinition.skillType,
+          manaCost: ps.skillDefinition.manaCost,
+          cooldown: ps.skillDefinition.cooldown,
+          targetType: ps.skillDefinition.targetType,
+          damageType: ps.skillDefinition.damageType,
+          damageFormula: ps.skillDefinition.damageFormula,
+          healingFormula: ps.skillDefinition.healingFormula,
+          effects: ps.skillDefinition.effects,
+          level: ps.level,
+        }));
+
+      console.log(
+        `✅ [startCombatWithEnemies] User ${u.id} has ${activeSkills.length} active skills:`,
+        activeSkills.map((s) => s.name),
+      );
 
       return {
         id: u.id,
@@ -569,6 +625,7 @@ export class CombatResultsService {
         isPlayer: true,
         stats: derivedStats,
         currentHp: u.stats.currentHp,
+        skills: activeSkills,
         skillCooldowns: {}, // Initialize empty cooldowns
       };
     });
@@ -857,17 +914,39 @@ export class CombatResultsService {
     // Prepare player inputs using derived stats from core attributes
     const playerInputsPromises = users.map(async (u) => {
       const coreAttrs = await this.calculateTotalCoreAttributes(u.id);
+      // Get passive skill bonuses
+      const skillEffects = await this.skillService.getPlayerSkillEffects(u.id);
       const derivedStats = deriveCombatStats({
         baseAttack: 10,
         baseMaxHp: 100,
         baseDefense: 5,
         ...coreAttrs,
       });
+      // Apply skill bonuses to derived stats
+      derivedStats.attack += skillEffects.statBonuses.attack || 0;
+      derivedStats.defense += skillEffects.statBonuses.defense || 0;
+      derivedStats.maxHp += skillEffects.statBonuses.maxHp || 0;
+      derivedStats.critRate += skillEffects.statBonuses.critRate || 0;
+      derivedStats.critDamage += skillEffects.statBonuses.critDamage || 0;
+      derivedStats.dodgeRate += skillEffects.statBonuses.dodgeRate || 0;
+      derivedStats.accuracy += skillEffects.statBonuses.accuracy || 0;
 
       // Get user's active skills
       const userSkills = await this.skillService.getPlayerSkills(u.id);
+      console.log(
+        `🔍 User ${u.id} (${u.username}) has ${userSkills.length} total skills`,
+      );
+
       const activeSkills = userSkills
-        .filter((ps) => ps.skillDefinition.skillType === 'active')
+        .filter((ps) => {
+          if (!ps.skillDefinition) {
+            console.warn(
+              `⚠️ PlayerSkill ${ps.id} has no skillDefinition relation!`,
+            );
+            return false;
+          }
+          return ps.skillDefinition.skillType === 'active';
+        })
         .map((ps) => ({
           id: ps.skillDefinition.skillId,
           name: ps.skillDefinition.name,
@@ -881,6 +960,11 @@ export class CombatResultsService {
           effects: ps.skillDefinition.effects,
           level: ps.level,
         }));
+
+      console.log(
+        `✅ User ${u.id} has ${activeSkills.length} active skills:`,
+        activeSkills.map((s) => s.name),
+      );
 
       return {
         id: u.id,

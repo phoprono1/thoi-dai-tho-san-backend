@@ -52,6 +52,7 @@ export interface SkillDefinitionData {
   damageType?: 'physical' | 'magical';
   damageFormula?: string; // e.g., "INT * 2 + level * 10"
   healingFormula?: string;
+  image?: string; // Path to skill icon image
 }
 
 @Entity('skill_definitions')
@@ -132,6 +133,19 @@ export class SkillDefinition {
 
   @Column({ nullable: true })
   healingFormula: string;
+
+  @Column({ nullable: true, type: 'varchar', length: 500 })
+  image: string; // Path to skill icon image like /assets/skills/xxx.webp
+
+  // Skill Prerequisites and Restrictions
+  @Column({ type: 'json', default: () => "'[]'" })
+  prerequisites: string[]; // Array of skillIds that must be unlocked first
+
+  @Column({ type: 'json', default: () => "'{}'}" })
+  requiredSkillLevels: Record<string, number>; // { "power_strike": 3 }
+
+  @Column({ type: 'json', default: () => "'[]'" })
+  classRestrictions: string[]; // Array of class names, empty = all classes
 
   @CreateDateColumn()
   createdAt: Date;

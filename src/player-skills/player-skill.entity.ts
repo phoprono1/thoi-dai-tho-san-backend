@@ -63,6 +63,9 @@ export class PlayerSkill {
   @Column({ default: 1 })
   level: number;
 
+  @Column({ default: false })
+  isEquipped: boolean;
+
   @CreateDateColumn()
   unlockedAt: Date;
 

@@ -11,6 +11,7 @@ import { User } from '../users/user.entity';
 import { CombatResultsModule } from '../combat-results/combat-results.module';
 import { UserStatsModule } from '../user-stats/user-stats.module';
 import { MailboxModule } from '../mailbox/mailbox.module';
+import { SkillModule } from '../player-skills/skill.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { MailboxModule } from '../mailbox/mailbox.module';
     CombatResultsModule,
     UserStatsModule,
     MailboxModule,
+    SkillModule,
   ],
   controllers: [
     PvpController, // Old controller (keep for backward compatibility)

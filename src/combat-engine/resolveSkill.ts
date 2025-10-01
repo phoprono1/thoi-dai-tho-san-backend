@@ -1,4 +1,5 @@
 import { CombatActorInput, CombatLogEntry, SkillData } from './types';
+import { evaluate } from 'mathjs';
 
 export interface ResolveSkillOptions {
   rng: { next: () => number; seed?: number | string };
@@ -186,13 +187,12 @@ function calculateSkillDamage(
   // Apply damage formula if available
   if (skill.damageFormula) {
     try {
-      // Simple formula evaluation - replace variables with actual values
-      let formula = skill.damageFormula;
-      formula = formula.replace(/INT/g, caster.stats.attack.toString()); // Using attack as INT proxy
-      formula = formula.replace(/level/g, skill.level.toString());
-
-      // Simple eval for basic arithmetic
-      damage = eval(formula) as number;
+      // Use mathjs for safe formula evaluation
+      const scope = {
+        INT: caster.stats.attack, // Using attack as INT proxy
+        level: skill.level,
+      };
+      damage = evaluate(skill.damageFormula, scope) as number;
     } catch (error) {
       console.warn(
         'Failed to evaluate damage formula:',
@@ -232,11 +232,12 @@ function calculateSkillHealing(
   // Apply healing formula if available
   if (skill.healingFormula) {
     try {
-      let formula = skill.healingFormula;
-      formula = formula.replace(/INT/g, caster.stats.attack.toString()); // Using attack as INT proxy
-      formula = formula.replace(/level/g, skill.level.toString());
-
-      healing = eval(formula) as number;
+      // Use mathjs for safe formula evaluation
+      const scope = {
+        INT: caster.stats.attack, // Using attack as INT proxy
+        level: skill.level,
+      };
+      healing = evaluate(skill.healingFormula, scope) as number;
     } catch (error) {
       console.warn(
         'Failed to evaluate healing formula:',

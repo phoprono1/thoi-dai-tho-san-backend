@@ -15,6 +15,7 @@ import { User } from '../users/user.entity';
 import { UserStat } from '../user-stats/user-stat.entity';
 import { Guild } from '../guild/guild.entity';
 import { Mailbox } from '../mailbox/mailbox.entity';
+import { SkillModule } from '../player-skills/skill.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { Mailbox } from '../mailbox/mailbox.entity';
       Guild,
       Mailbox,
     ]),
+    SkillModule,
   ],
   controllers: [WorldBossController],
   providers: [
