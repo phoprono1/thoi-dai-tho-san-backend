@@ -138,7 +138,13 @@ export class ItemsService {
   }
 
   async remove(id: number): Promise<{ success: boolean; message: string }> {
-    // Check if item is being used by any users
+    // Check if item exists first
+    const item = await this.findOne(id);
+    if (!item) {
+      return { success: false, message: 'Item not found' };
+    }
+
+    // Count how many users own this item (for informational message)
     const userItemsCount = await this.itemsRepository
       .createQueryBuilder('item')
       .leftJoin('user_item', 'ui', 'ui.itemId = item.id')
@@ -146,26 +152,19 @@ export class ItemsService {
       .andWhere('ui.id IS NOT NULL')
       .getCount();
 
-    if (userItemsCount > 0) {
-      return {
-        success: false,
-        message: `Cannot delete item: it is currently owned by ${userItemsCount} user(s). Remove all user ownership before deleting.`,
-      };
-    }
-
-    // If this item is a gacha box mapping, delete the gacha box as well
-    const item = await this.findOne(id);
-    if (!item) {
-      return { success: false, message: 'Item not found' };
-    }
-
     try {
-      // Use a transaction so both deletes happen atomically
+      // Use a transaction to ensure atomic deletion
       const queryRunner =
         this.itemsRepository.manager.connection.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
+        // First, delete all user_items for this item (admin forced removal)
+        if (userItemsCount > 0) {
+          await queryRunner.manager.delete('user_item', { itemId: id } as any);
+        }
+
+        // If this item is a gacha box mapping, delete the gacha box as well
         if (item.gachaBoxId) {
           // Delete the gacha box; cascade relations are handled by DB/module
           await queryRunner.manager.delete('gacha_box', {
@@ -173,11 +172,16 @@ export class ItemsService {
           } as any);
         }
 
+        // Finally, delete the item itself
         const result = await queryRunner.manager.delete('item', { id } as any);
         await queryRunner.commitTransaction();
 
         if (result.affected && result.affected > 0) {
-          return { success: true, message: 'Item deleted successfully' };
+          const message =
+            userItemsCount > 0
+              ? `Item deleted successfully. Removed from ${userItemsCount} user(s) inventory.`
+              : 'Item deleted successfully';
+          return { success: true, message };
         } else {
           return { success: false, message: 'Item not found' };
         }
@@ -188,7 +192,7 @@ export class ItemsService {
         await queryRunner.release();
       }
     } catch (err) {
-      console.error('Failed to delete item and linked gacha box:', err);
+      console.error('Failed to delete item and associated data:', err);
       return { success: false, message: 'Internal error while deleting item' };
     }
   }

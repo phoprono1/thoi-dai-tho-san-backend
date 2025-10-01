@@ -776,6 +776,7 @@ export class UserItemsService {
     let leveledUp = false;
     let newLevel = oldLevel;
     let attributePointsGained = 0;
+    let skillPointsGained = 0;
 
     // Lấy user mới nhất sau khi cộng exp
     let updatedUser = await this.usersRepository.findOne({
@@ -794,6 +795,7 @@ export class UserItemsService {
         updatedUser.experience -= nextLevel.experienceRequired;
         leveledUp = true;
         newLevel = updatedUser.level;
+        skillPointsGained += 1; // Count skill points (1 per level)
         await this.usersRepository.save(updatedUser);
 
         // Cộng điểm tự do cho từng cấp
@@ -820,15 +822,31 @@ export class UserItemsService {
       }
     }
 
+    // Grant skill points after all level ups (1 per level gained)
+    if (skillPointsGained > 0) {
+      try {
+        await this.userStatsService.grantSkillPoints(
+          updatedUser.id,
+          skillPointsGained,
+        );
+      } catch (err) {
+        console.warn(
+          'Failed to grant skill points after EXP potion level up:',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     return {
       success: true,
-      message: `Đã nhận ${expGain} EXP${leveledUp ? ` và lên level ${newLevel}!` : ''}${attributePointsGained > 0 ? ` Nhận ${attributePointsGained} điểm thuộc tính.` : ''}`,
+      message: `Đã nhận ${expGain} EXP${leveledUp ? ` và lên level ${newLevel}!` : ''}${attributePointsGained > 0 ? ` Nhận ${attributePointsGained} điểm thuộc tính.` : ''}${skillPointsGained > 0 ? ` Nhận ${skillPointsGained} điểm kỹ năng.` : ''}`,
       effects: {
         expGained: expGain,
         oldLevel,
         newLevel,
         leveledUp,
         attributePointsGained,
+        skillPointsGained,
         totalExp: updatedUser.experience,
       },
     };

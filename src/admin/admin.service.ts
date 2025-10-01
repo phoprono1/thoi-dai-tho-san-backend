@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
@@ -16,6 +16,53 @@ export class AdminService {
     private characterClassHistoryRepository: Repository<CharacterClassHistory>,
   ) {}
 
+  async resetUser(userId: number): Promise<{ ok: boolean; message: string }> {
+    // Find the user
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      return { ok: false, message: 'User not found' };
+    }
+
+    // Reset user level, exp and character class
+    user.level = 1;
+    user.experience = 0;
+    user.characterClass = null;
+    await this.usersRepository.save(user);
+
+    // Reset stats including skill points
+    const stat = await this.userStatsRepository.findOne({
+      where: { userId: user.id },
+    });
+    if (stat) {
+      stat.currentHp = 100;
+      stat.strength = 10;
+      stat.intelligence = 10;
+      stat.dexterity = 10;
+      stat.vitality = 10;
+      stat.luck = 10;
+      stat.unspentAttributePoints = 0;
+      stat.strengthPoints = 0;
+      stat.intelligencePoints = 0;
+      stat.dexterityPoints = 0;
+      stat.vitalityPoints = 0;
+      stat.luckPoints = 0;
+      // Reset skill points
+      stat.availableSkillPoints = 0;
+      stat.totalSkillPointsEarned = 0;
+      await this.userStatsRepository.save(stat);
+    }
+
+    // Reset character class - remove all class history
+    await this.characterClassHistoryRepository.delete({
+      characterId: user.id,
+    });
+
+    return {
+      ok: true,
+      message: `User ${user.username} has been reset successfully`,
+    };
+  }
+
   async resetAllUsers(): Promise<{ ok: boolean; count: number }> {
     const users = await this.usersRepository.find();
     let count = 0;
@@ -26,7 +73,7 @@ export class AdminService {
       user.characterClass = null;
       await this.usersRepository.save(user);
 
-      // Reset stats
+      // Reset stats including skill points
       const stat = await this.userStatsRepository.findOne({
         where: { userId: user.id },
       });
@@ -43,6 +90,9 @@ export class AdminService {
         stat.dexterityPoints = 0;
         stat.vitalityPoints = 0;
         stat.luckPoints = 0;
+        // Reset skill points
+        stat.availableSkillPoints = 0;
+        stat.totalSkillPointsEarned = 0;
         await this.userStatsRepository.save(stat);
       }
 

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { combatQueue } from '../queues/combat.queue';
-import { MonsterService } from '../monsters/monster.service';
+import { WildAreaService } from '../wildarea/wildarea.service';
 import { CombatResultsService } from '../combat-results/combat-results.service';
 import { UserStaminaService } from '../user-stamina/user-stamina.service';
 
@@ -15,7 +15,7 @@ export class ExploreService {
   private redis: Redis;
 
   constructor(
-    private readonly monsterService: MonsterService,
+    private readonly wildAreaService: WildAreaService,
     private readonly combatResultsService: CombatResultsService,
     private readonly userStaminaService: UserStaminaService,
   ) {
@@ -48,25 +48,7 @@ export class ExploreService {
     ).usersRepository.findOne({ where: { id: userId }, relations: ['stats'] });
     if (!user) throw new Error('Người chơi không tồn tại');
 
-    const level = user.level || 1;
-
-    // Level range: [level-3 .. level+1]
-    const minLevel = Math.max(1, level - 3);
-    const maxLevel = Math.max(minLevel, level + 1);
-
-    const candidates = await this.monsterService.getMonstersByLevelRange(
-      minLevel,
-      maxLevel,
-    );
-    if (!candidates || candidates.length === 0)
-      throw new Error('Không tìm thấy quái phù hợp');
-
-    // Randomly select `count` monsters with replacement allowed
-    const selected: any[] = [];
-    for (let i = 0; i < count; i++) {
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      selected.push({ monsterId: pick.id });
-    }
+    const level = Number(user.level) || 1;
 
     // Check stamina (5 cost)
     const staminaCost = 5;
@@ -81,9 +63,19 @@ export class ExploreService {
     // Set cooldown key (10s)
     await this.redis.set(key, '1', 'EX', 10);
 
-    // Build enemies payload for the worker: similar shape to dungeon.monsterCounts
-    const enemyPayload = selected.map((s, idx) => ({
-      monsterId: Number(s.monsterId),
+    // Use WildAreaService to get monsters instead of all monsters
+    const monsters = await this.wildAreaService.selectRandomMonsters(
+      level,
+      count,
+    );
+
+    if (!monsters || monsters.length === 0) {
+      throw new Error('Không tìm thấy quái phù hợp trong khu dã ngoại');
+    }
+
+    // Build enemies payload for the worker
+    const enemyPayload = monsters.map((monster) => ({
+      monsterId: Number(monster.id),
       count: 1,
     }));
 

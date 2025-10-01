@@ -22,6 +22,21 @@ export class AdminController {
     private readonly adminService: AdminService,
   ) {}
   @UseGuards(JwtAuthGuard)
+  @Post('reset-user/:userId')
+  @ApiOperation({
+    summary: 'Admin: Reset một người chơi về level 1 và chỉ số mặc định',
+  })
+  async resetUser(@Param('userId') userId: string, @Request() req: any) {
+    const maybe = req as unknown;
+    const caller = maybe as any;
+    const isAdminCaller = !!caller?.user?.isAdmin;
+    if (!isAdminCaller) throw new ForbiddenException('Admin only');
+
+    const result = await this.adminService.resetUser(+userId);
+    return result;
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('reset-all-users')
   @ApiOperation({
     summary: 'Admin: Reset toàn bộ người chơi về level 1 và chỉ số mặc định',

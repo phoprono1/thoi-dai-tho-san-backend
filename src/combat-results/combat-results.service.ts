@@ -1431,6 +1431,7 @@ export class CombatResultsService {
 
   private async checkAndApplyLevelUp(user: User): Promise<void> {
     let leveledUp = false;
+    let levelsGained = 0;
 
     while (true) {
       // Lấy thông tin level tiếp theo
@@ -1447,6 +1448,7 @@ export class CombatResultsService {
         // NOTE: Experience is cumulative, don't subtract it
         // user.experience -= nextLevel.experienceRequired;
         leveledUp = true;
+        levelsGained += 1;
 
         // NOTE: Level bonuses are now calculated on-demand in getTotalStatsWithAllBonuses
         // Do NOT permanently modify base stats in the database
@@ -1471,6 +1473,18 @@ export class CombatResultsService {
         }
       } else {
         break;
+      }
+    }
+
+    // Grant skill points for all levels gained (1 per level)
+    if (levelsGained > 0) {
+      try {
+        await this.userStatsService.grantSkillPoints(user.id, levelsGained);
+      } catch (err) {
+        console.warn(
+          'Failed to grant skill points after combat level up:',
+          err instanceof Error ? err.message : err,
+        );
       }
     }
 
