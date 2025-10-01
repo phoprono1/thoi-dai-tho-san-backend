@@ -329,6 +329,67 @@ export class UserStatsService {
   }
 
   /**
+   * Recalculate and grant missing attribute points based on user level
+   * This is a one-time compensation for users who leveled up without receiving points
+   */
+  async recalculateAttributePoints(
+    userId: number,
+  ): Promise<{ success: boolean; message: string; pointsGranted?: number }> {
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      return { success: false, message: 'User stats not found' };
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+    });
+    if (!user) {
+      return { success: false, message: 'User not found' };
+    }
+
+    // Calculate expected total points by summing attributePointsReward from all levels achieved
+    // Query all levels from 2 to current level (level 1 has no points)
+    const allLevels = await this.levelsService.findAll();
+
+    // Sum up attribute points from level 2 to user.level
+    let expectedTotalPoints = 0;
+    for (const level of allLevels) {
+      if (level.level > 1 && level.level <= user.level) {
+        expectedTotalPoints += level.attributePointsReward || 0;
+      }
+    }
+
+    // Calculate current total points (allocated + unspent)
+    const currentTotalPoints =
+      userStats.strengthPoints +
+      userStats.intelligencePoints +
+      userStats.dexterityPoints +
+      userStats.vitalityPoints +
+      userStats.luckPoints +
+      userStats.unspentAttributePoints;
+
+    // Calculate missing points
+    const missingPoints = expectedTotalPoints - currentTotalPoints;
+
+    if (missingPoints <= 0) {
+      return {
+        success: false,
+        message: 'No missing attribute points detected. Your points are correct.',
+      };
+    }
+
+    // Grant the missing points
+    userStats.unspentAttributePoints += missingPoints;
+    await this.userStatsRepository.save(userStats);
+
+    return {
+      success: true,
+      message: `Successfully granted ${missingPoints} missing attribute points`,
+      pointsGranted: missingPoints,
+    };
+  }
+
+  /**
    * Recalculate and update current HP based on current total stats
    * Useful after level up or stat changes
    */

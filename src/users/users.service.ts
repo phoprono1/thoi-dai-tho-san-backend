@@ -298,6 +298,7 @@ export class UsersService {
     }
 
     const originalLevel = user.level;
+    let totalAttributePointsToGrant = 0;
 
     // Loop to level up multiple times if exp allows
     while (true) {
@@ -315,6 +316,9 @@ export class UsersService {
       // Tăng level và trừ experience cần thiết
       user.level += 1;
       user.experience -= nextLevel.experienceRequired;
+      
+      // Accumulate attribute points from this level's reward
+      totalAttributePointsToGrant += nextLevel.attributePointsReward || 0;
 
       // Lưu user trước để update level
       await this.usersRepository.save(user);
@@ -324,6 +328,23 @@ export class UsersService {
 
     if (user.level === originalLevel) {
       throw new Error('Not enough experience to level up');
+    }
+
+    // Grant accumulated attribute points from all levels gained
+    if (totalAttributePointsToGrant > 0) {
+      try {
+        await this.userStatsService.addFreeAttributePoints(
+          user.id,
+          totalAttributePointsToGrant,
+        );
+        this.logger.log(
+          `Granted ${totalAttributePointsToGrant} attribute points to user ${user.id} (leveled from ${originalLevel} to ${user.level})`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to grant attribute points on level up: ${(err as Error).message}`,
+        );
+      }
     }
 
     // Lưu user

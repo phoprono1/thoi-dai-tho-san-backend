@@ -21,14 +21,101 @@ import { AdminGuard } from '../auth/admin.guard';
 export class QuestController {
   constructor(private readonly questService: QuestService) {}
 
-  @Post()
-  async createQuest(@Body() questData: any) {
-    return this.questService.createQuest(questData);
-  }
+  // ============================================
+  // STATIC ROUTES - MUST BE BEFORE DYNAMIC ROUTES
+  // ============================================
 
   @Get()
   async getAllQuests() {
     return this.questService.getAllQuests();
+  }
+
+  // Admin endpoints - Place BEFORE dynamic :id routes
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Get('admin')
+  async adminGetAllQuests() {
+    return this.questService.getAllQuests();
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Post('admin')
+  async adminCreateQuest(@Body() questData: any) {
+    return this.questService.createQuest(questData);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Put('admin/:id')
+  async adminUpdateQuest(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() questData: any,
+  ) {
+    return await this.questService.updateQuest(id, questData);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Delete('admin/:id')
+  async adminDeleteQuest(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('force') forceQuery?: string,
+  ) {
+    const force = forceQuery === 'true';
+    await this.questService.deleteQuest(id, force);
+    return { message: 'Quest deleted successfully' };
+  }
+
+  // User-specific static routes
+  @UseGuards(JwtAuthGuard)
+  @Get('user/my-quests')
+  async getUserQuests(@Request() req) {
+    return this.questService.getUserQuests(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('user/available')
+  async getAvailableQuests(@Request() req) {
+    return this.questService.getAvailableQuestsForUser(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('user/progress-summary')
+  async getQuestProgressSummary(@Request() req) {
+    return this.questService.getQuestProgressSummary(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('daily/reset')
+  async resetDailyQuests(@Request() req) {
+    await this.questService.resetAllDailyQuestsForUser(req.user.id);
+    return { message: 'Daily quests reset successfully' };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('combat-progress')
+  async updateQuestProgressFromCombat(
+    @Request() req,
+    @Body()
+    combatData: {
+      combatResultId: number;
+      dungeonId?: number;
+      enemyKills?: { enemyType: string; count: number }[];
+      bossDefeated?: boolean;
+    },
+  ) {
+    await this.questService.updateQuestProgressFromCombat(
+      req.user.id,
+      combatData.combatResultId,
+      combatData,
+    );
+    return { message: 'Quest progress updated from combat' };
+  }
+
+  // ============================================
+  // DYNAMIC ROUTES - MUST BE AFTER STATIC ROUTES
+  // ============================================
+
+  @Post()
+  async createQuest(@Body() questData: any) {
+    return this.questService.createQuest(questData);
   }
 
   @Put(':id')
@@ -48,12 +135,6 @@ export class QuestController {
     const force = forceQuery === 'true';
     await this.questService.deleteQuest(id, force);
     return { message: 'Quest deleted successfully' };
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('user/my-quests')
-  async getUserQuests(@Request() req) {
-    return this.questService.getUserQuests(req.user.id);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -108,78 +189,5 @@ export class QuestController {
   ) {
     // userQuestId is the id of the UserQuest row
     return this.questService.claimQuestReward(req.user.id, userQuestId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('user/available')
-  async getAvailableQuests(@Request() req) {
-    return this.questService.getAvailableQuestsForUser(req.user.id);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post('daily/reset')
-  async resetDailyQuests(@Request() req) {
-    await this.questService.resetAllDailyQuestsForUser(req.user.id);
-    return { message: 'Daily quests reset successfully' };
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post('combat-progress')
-  async updateQuestProgressFromCombat(
-    @Request() req,
-    @Body()
-    combatData: {
-      combatResultId: number;
-      dungeonId?: number;
-      enemyKills?: { enemyType: string; count: number }[];
-      bossDefeated?: boolean;
-    },
-  ) {
-    await this.questService.updateQuestProgressFromCombat(
-      req.user.id,
-      combatData.combatResultId,
-      combatData,
-    );
-    return { message: 'Quest progress updated from combat' };
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('user/progress-summary')
-  async getQuestProgressSummary(@Request() req) {
-    return this.questService.getQuestProgressSummary(req.user.id);
-  }
-
-  // Admin endpoints
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Post('admin')
-  async adminCreateQuest(@Body() questData: any) {
-    return this.questService.createQuest(questData);
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Get('admin')
-  async adminGetAllQuests() {
-    return this.questService.getAllQuests();
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Put('admin/:id')
-  async adminUpdateQuest(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() questData: any,
-  ) {
-    return await this.questService.updateQuest(id, questData);
-  }
-
-  @UseGuards(JwtAuthGuard, AdminGuard)
-  @Delete('admin/:id')
-  async adminDeleteQuest(
-    @Param('id', ParseIntPipe) id: number,
-    @Query('force') forceQuery?: string,
-  ) {
-    // Allow force deletion via query param `?force=true`
-    const force = forceQuery === 'true';
-    await this.questService.deleteQuest(id, force);
-    return { message: 'Quest deleted successfully' };
   }
 }

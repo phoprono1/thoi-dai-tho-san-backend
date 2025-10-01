@@ -96,4 +96,13 @@ export class UserAttributesController {
     const result = await this.userStatsService.resetAttributePoints(userId);
     return result;
   }
+
+  @Post('recalculate')
+  async recalculateAttributePoints(@Request() req) {
+    const userId = req.user.id;
+    const result = await this.userStatsService.recalculateAttributePoints(
+      userId,
+    );
+    return result;
+  }
 }

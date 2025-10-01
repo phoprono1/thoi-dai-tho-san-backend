@@ -305,8 +305,19 @@ export class PvpRankingService {
       take: limit,
     });
 
+    // Filter out rankings with null users (orphaned records from deleted accounts)
+    const validLeaderboard = leaderboard.filter((ranking) => {
+      if (!ranking.user) {
+        this.logger.warn(
+          `Found orphaned PvP ranking ${ranking.id} with null user (userId: ${ranking.userId})`,
+        );
+        return false;
+      }
+      return true;
+    });
+
     // Ensure calculated properties are included
-    return leaderboard.map((ranking) => ({
+    return validLeaderboard.map((ranking) => ({
       ...ranking,
       rankName: ranking.rankName,
       winRate: ranking.winRate,
