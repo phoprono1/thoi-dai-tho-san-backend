@@ -17,6 +17,7 @@ import { Monster } from '../monsters/monster.entity';
 import { MonstersModule } from '../monsters/monsters.module';
 import { ItemsModule } from '../items/items.module';
 import { SkillModule } from '../player-skills/skill.module';
+import { QuestModule } from '../quests/quest.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { SkillModule } from '../player-skills/skill.module';
     MonstersModule,
     ItemsModule,
     SkillModule,
+    QuestModule,
   ],
   providers: [CombatResultsService],
   controllers: [CombatResultsController],

@@ -76,109 +76,170 @@ export class RoomLobbyGateway
           // we intentionally don't await subscribe result here; handle messages as they arrive
 
           await sub.subscribe('combat:result');
+          await sub.subscribe('combat:error');
+
           sub.on('message', (_channel: string, message: string) => {
-            this.logger.log('[Redis] combat:result message received');
-            void (async () => {
-              try {
-                const payload = JSON.parse(message as string);
-                let roomId = payload.roomId;
-                const jobId = payload.jobId;
-                const result = payload.result;
-
-                // If roomId is missing, try to resolve it from the enqueue map
-                // (set when this gateway enqueued the job). This covers cases
-                // where the job was enqueued with missing/undefined roomId but
-                // we still want to route the result to the originating room.
-                if (!roomId && jobId) {
-                  // try both string and numeric keys safely
-                  const mappedByString = this.jobToRoomMap.get(String(jobId));
-                  let mappedByRaw: number | undefined = undefined;
-                  if (typeof jobId === 'string' || typeof jobId === 'number') {
-                    mappedByRaw = this.jobToRoomMap.get(
-                      jobId as string | number,
-                    );
-                  }
-                  const mapped = mappedByString ?? mappedByRaw;
-                  if (mapped) {
-                    roomId = mapped;
-                    this.logger.log(
-                      `[Emit Debug] Resolved roomId=${roomId} for jobId=${jobId} from enqueue map`,
-                    );
-                  } else {
-                    this.logger.warn(
-                      `[Redis] combat:result payload without roomId (jobId=${jobId}) - full payload: ${message}`,
-                    );
-                  }
-                }
-
-                // Debug: Count clients in room before emitting
-                const roomName = `room_${roomId}`;
-                const socketIdSet = await this.server.in(roomName).allSockets();
-                const socketIds = Array.from(socketIdSet || []);
-                const clientsCount = socketIds.length;
-
-                this.logger.log(
-                  `[Emit Debug] Emitting combatResult to ${roomName}, clients count: ${clientsCount}`,
-                );
-                this.logger.log(
-                  `[Emit Debug] Socket IDs: ${socketIds.join(', ')}`,
-                );
-
-                // Debug: Check each socket's data
-                for (const socketId of socketIds) {
-                  const socket = this.server?.sockets?.sockets?.get(socketId);
-                  const socketData = (socket?.data as any) || {};
-                  this.logger.log(
-                    `[Emit Debug] socket ${socketId} data:`,
-                    socketData,
-                  );
-                }
-
-                if (roomId) {
-                  this.server
-                    .to(`room_${roomId}`)
-                    .emit('combatResult', { roomId, result });
-                } else {
-                  // No room resolved: skip emitting to rooms
-                  this.logger.warn(
-                    `[Emit Debug] Skipping emit because no roomId resolved for jobId=${jobId}`,
-                  );
-                }
-                this.logger.log(
-                  `[Redis] combatResult emitted to room_${roomId}`,
-                );
-                // After emitting combat result to clients, perform server-side cleanup
-                // to reset player ready states and room status so every new combat
-                // requires players to Ready again.
+            if (_channel === 'combat:result') {
+              this.logger.log('[Redis] combat:result message received');
+              void (async () => {
                 try {
-                  const updated = await this.roomLobbyService.postCombatCleanup(
-                    roomId as number,
+                  const payload = JSON.parse(message as string);
+                  let roomId = payload.roomId;
+                  const jobId = payload.jobId;
+                  const result = payload.result;
+
+                  // If roomId is missing, try to resolve it from the enqueue map
+                  // (set when this gateway enqueued the job). This covers cases
+                  // where the job was enqueued with missing/undefined roomId but
+                  // we still want to route the result to the originating room.
+                  if (!roomId && jobId) {
+                    // try both string and numeric keys safely
+                    const mappedByString = this.jobToRoomMap.get(String(jobId));
+                    let mappedByRaw: number | undefined = undefined;
+                    if (
+                      typeof jobId === 'string' ||
+                      typeof jobId === 'number'
+                    ) {
+                      mappedByRaw = this.jobToRoomMap.get(
+                        jobId as string | number,
+                      );
+                    }
+                    const mapped = mappedByString ?? mappedByRaw;
+                    if (mapped) {
+                      roomId = mapped;
+                      this.logger.log(
+                        `[Emit Debug] Resolved roomId=${roomId} for jobId=${jobId} from enqueue map`,
+                      );
+                    } else {
+                      this.logger.warn(
+                        `[Redis] combat:result payload without roomId (jobId=${jobId}) - full payload: ${message}`,
+                      );
+                    }
+                  }
+
+                  // Debug: Count clients in room before emitting
+                  const roomName = `room_${roomId}`;
+                  const socketIdSet = await this.server
+                    .in(roomName)
+                    .allSockets();
+                  const socketIds = Array.from(socketIdSet || []);
+                  const clientsCount = socketIds.length;
+
+                  this.logger.log(
+                    `[Emit Debug] Emitting combatResult to ${roomName}, clients count: ${clientsCount}`,
                   );
-                  if (updated) {
+                  this.logger.log(
+                    `[Emit Debug] Socket IDs: ${socketIds.join(', ')}`,
+                  );
+
+                  // Debug: Check each socket's data
+                  for (const socketId of socketIds) {
+                    const socket = this.server?.sockets?.sockets?.get(socketId);
+                    const socketData = (socket?.data as any) || {};
+                    this.logger.log(
+                      `[Emit Debug] socket ${socketId} data:`,
+                      socketData,
+                    );
+                  }
+
+                  if (roomId) {
                     this.server
                       .to(`room_${roomId}`)
-                      .emit('roomUpdated', updated);
+                      .emit('combatResult', { roomId, result });
+                  } else {
+                    // No room resolved: skip emitting to rooms
+                    this.logger.warn(
+                      `[Emit Debug] Skipping emit because no roomId resolved for jobId=${jobId}`,
+                    );
+                  }
+                  this.logger.log(
+                    `[Redis] combatResult emitted to room_${roomId}`,
+                  );
+                  // After emitting combat result to clients, perform server-side cleanup
+                  // to reset player ready states and room status so every new combat
+                  // requires players to Ready again.
+                  try {
+                    const updated =
+                      await this.roomLobbyService.postCombatCleanup(
+                        roomId as number,
+                      );
+                    if (updated) {
+                      this.server
+                        .to(`room_${roomId}`)
+                        .emit('roomUpdated', updated);
+                    }
+                  } catch (e) {
+                    this.logger.warn(
+                      `postCombatCleanup failed for room ${roomId}: ${
+                        (e as any)?.message || e
+                      }`,
+                    );
+                  }
+                  // cleanup mapping for this jobId if present
+                  try {
+                    if (jobId) this.jobToRoomMap.delete(String(jobId));
+                  } catch (cleanupErr) {
+                    // ignore cleanup errors
                   }
                 } catch (e) {
                   this.logger.warn(
-                    `postCombatCleanup failed for room ${roomId}: ${
-                      (e as any)?.message || e
-                    }`,
+                    'Failed to parse combat result message: ' +
+                      ((e as any)?.message || e),
                   );
                 }
-                // cleanup mapping for this jobId if present
+              })();
+            } else if (_channel === 'combat:error') {
+              this.logger.log('[Redis] combat:error message received');
+              void (async () => {
                 try {
-                  if (jobId) this.jobToRoomMap.delete(String(jobId));
-                } catch (cleanupErr) {
-                  // ignore cleanup errors
+                  const payload = JSON.parse(message as string);
+                  let roomId = payload.roomId;
+                  const jobId = payload.jobId;
+                  const error = payload.error;
+
+                  // Resolve roomId from enqueue map if missing
+                  if (!roomId && jobId) {
+                    const mappedByString = this.jobToRoomMap.get(String(jobId));
+                    let mappedByRaw: number | undefined = undefined;
+                    if (
+                      typeof jobId === 'string' ||
+                      typeof jobId === 'number'
+                    ) {
+                      mappedByRaw = this.jobToRoomMap.get(
+                        jobId as string | number,
+                      );
+                    }
+                    const mapped = mappedByString ?? mappedByRaw;
+                    if (mapped) {
+                      roomId = mapped;
+                      this.logger.log(
+                        `[Combat Error] Resolved roomId=${roomId} for jobId=${jobId}`,
+                      );
+                    }
+                  }
+
+                  if (roomId) {
+                    // Emit error to frontend
+                    this.server
+                      .to(`room_${roomId}`)
+                      .emit('combatError', { roomId, error });
+
+                    this.logger.log(
+                      `[Combat Error] Emitted error to room_${roomId}: ${error.message}`,
+                    );
+                  } else {
+                    this.logger.warn(
+                      `[Combat Error] No roomId resolved for error jobId=${jobId}`,
+                    );
+                  }
+                } catch (e) {
+                  this.logger.warn(
+                    'Failed to parse combat error message: ' +
+                      ((e as any)?.message || e),
+                  );
                 }
-              } catch (e) {
-                this.logger.warn(
-                  'Failed to parse combat result message: ' +
-                    ((e as any)?.message || e),
-                );
-              }
-            })();
+              })();
+            }
           });
         } catch (e) {
           this.logger.warn(

@@ -51,15 +51,40 @@ async function bootstrapWorker() {
 
       // Fallback: existing dungeon flow
       const dungeonId = data.dungeonId || 1;
-      const result = await combatService.startCombat(userIds, dungeonId);
 
-      // publish to redis channel
-      await redisPub.publish(
-        'combat:result',
-        JSON.stringify({ roomId, jobId: job.id, result }),
-      );
+      try {
+        const result = await combatService.startCombat(userIds, dungeonId);
 
-      return result;
+        // publish success result to redis channel
+        await redisPub.publish(
+          'combat:result',
+          JSON.stringify({ roomId, jobId: job.id, result }),
+        );
+
+        return result;
+      } catch (error) {
+        // Handle combat errors (like missing items) and send to frontend
+        console.log(
+          `[COMBAT WORKER] Combat failed for room ${roomId}:`,
+          error.message,
+        );
+
+        // Publish error to frontend via WebSocket
+        await redisPub.publish(
+          'combat:error',
+          JSON.stringify({
+            roomId,
+            jobId: job.id,
+            error: {
+              message: error.message,
+              type: 'COMBAT_REQUIREMENT_ERROR',
+            },
+          }),
+        );
+
+        // Re-throw to mark job as failed
+        throw error;
+      }
     },
     { connection, concurrency: 2 },
   );

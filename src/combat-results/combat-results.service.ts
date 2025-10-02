@@ -19,6 +19,7 @@ import { UserStaminaService } from '../user-stamina/user-stamina.service';
 import { Monster } from '../monsters/monster.entity';
 import { ItemsService } from '../items/items.service';
 import { SkillService } from '../player-skills/skill.service';
+import { QuestService } from '../quests/quest.service';
 import { runCombat } from '../combat-engine/engine';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
 
@@ -43,6 +44,7 @@ export class CombatResultsService {
     private userStatsService: UserStatsService,
     private itemsService: ItemsService,
     private skillService: SkillService,
+    private questService: QuestService,
   ) {}
 
   /**
@@ -115,6 +117,9 @@ export class CombatResultsService {
   }
 
   async startCombat(userIds: number[], dungeonId: number) {
+    console.log(
+      `[ITEM DEBUG - COMBAT SERVICE] ===== Starting combat for users ${userIds.join(', ')} in dungeon ${dungeonId} =====`,
+    );
     const startTime = Date.now();
 
     // Lấy thông tin users và dungeon
@@ -127,8 +132,135 @@ export class CombatResultsService {
       where: { id: dungeonId },
     });
 
+    console.log(`[ITEM DEBUG - COMBAT SERVICE] Dungeon info:`, {
+      id: dungeon?.id,
+      name: dungeon?.name,
+      requiredItem: dungeon?.requiredItem,
+    });
+
     if (users.length !== userIds.length || !dungeon) {
       throw new Error('Một số người chơi hoặc dungeon không tồn tại');
+    }
+
+    // ===== ITEM CONSUMPTION LOGIC =====
+    // Check if dungeon requires an item
+    if (dungeon.requiredItem) {
+      console.log(
+        `[ITEM DEBUG - COMBAT SERVICE] Dungeon requires item ${dungeon.requiredItem}`,
+      );
+
+      // Get required item info for better error messages
+      let requiredItemName = `vật phẩm #${dungeon.requiredItem}`;
+      try {
+        const itemInfo = await this.itemsService.findOne(dungeon.requiredItem);
+        if (itemInfo) {
+          requiredItemName = itemInfo.name;
+        }
+      } catch (err) {
+        console.warn(
+          `[ITEM DEBUG - COMBAT SERVICE] Could not fetch item info for ${dungeon.requiredItem}:`,
+          err,
+        );
+      }
+
+      // First, check if all users have the required item
+      console.log(
+        `[ITEM DEBUG - COMBAT SERVICE] Checking required items for ${users.length} users...`,
+      );
+
+      for (const user of users) {
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] ===== Checking user ${user.id} (${user.username}) =====`,
+        );
+
+        // Get current item count before any operations
+        const beforeItems = await this.userItemsService.findByUserId(user.id);
+        const beforeCount =
+          beforeItems.find((item) => item.itemId === dungeon.requiredItem)
+            ?.quantity || 0;
+
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] User ${user.id} has ${beforeCount}x item ${dungeon.requiredItem} BEFORE any operations`,
+        );
+
+        // Check if user has the required item
+        const userItemData = await this.userItemsService.findByUserAndItem(
+          user.id,
+          dungeon.requiredItem,
+        );
+
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] findByUserAndItem result for user ${user.id}:`,
+          userItemData,
+        );
+
+        if (!userItemData || userItemData.quantity < 1) {
+          throw new Error(
+            `Người chơi ${user.username} không có đủ ${requiredItemName} để vào hầm ngục này`,
+          );
+        }
+      }
+
+      // If all users have required items, consume them
+      console.log(
+        `[ITEM DEBUG - COMBAT SERVICE] All users have required items, proceeding to consumption...`,
+      );
+
+      for (const user of users) {
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] ===== Consuming item from user ${user.id} (${user.username}) =====`,
+        );
+
+        // Get item count before consumption
+        const beforeItems = await this.userItemsService.findByUserId(user.id);
+        const beforeCount =
+          beforeItems.find((item) => item.itemId === dungeon.requiredItem)
+            ?.quantity || 0;
+
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] User ${user.id} has ${beforeCount}x item ${dungeon.requiredItem} BEFORE consumption`,
+        );
+
+        // Remove the item
+        const removeResult = await this.userItemsService.removeItemFromUser(
+          user.id,
+          dungeon.requiredItem,
+          1,
+        );
+
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] removeItemFromUser result for user ${user.id}:`,
+          removeResult,
+        );
+
+        // Verify item was consumed
+        const afterItems = await this.userItemsService.findByUserId(user.id);
+        const afterCount =
+          afterItems.find((item) => item.itemId === dungeon.requiredItem)
+            ?.quantity || 0;
+
+        console.log(
+          `[ITEM DEBUG - COMBAT SERVICE] User ${user.id} has ${afterCount}x item ${dungeon.requiredItem} AFTER consumption (should be ${beforeCount - 1})`,
+        );
+
+        if (afterCount !== beforeCount - 1) {
+          console.error(
+            `[ITEM DEBUG - COMBAT SERVICE] ❌ Item consumption verification FAILED for user ${user.id}! Expected ${beforeCount - 1}, got ${afterCount}`,
+          );
+        } else {
+          console.log(
+            `[ITEM DEBUG - COMBAT SERVICE] ✅ Item consumption verification SUCCESS for user ${user.id}`,
+          );
+        }
+      }
+
+      console.log(
+        `[ITEM DEBUG - COMBAT SERVICE] ===== Item consumption completed for all users =====`,
+      );
+    } else {
+      console.log(
+        `[ITEM DEBUG - COMBAT SERVICE] Dungeon ${dungeonId} does not require any items`,
+      );
     }
 
     // Kiểm tra level requirement cho tất cả users
@@ -480,6 +612,12 @@ export class CombatResultsService {
     enemiesTemplates: any[],
     _options?: any,
   ) {
+    console.log('🚀 [WILDAREA COMBAT] startCombatWithEnemies called with:', {
+      userIds,
+      enemiesTemplates,
+      _options,
+    });
+
     const users = await this.usersRepository.find({
       where: userIds.map((id) => ({ id })),
       relations: ['stats'],
@@ -866,6 +1004,78 @@ export class CombatResultsService {
           items,
         };
         await this.applyRewards(user, rewardForUser);
+      }
+    }
+
+    // Update quest progress for wildarea combat
+    console.log(
+      '🔍 [WILDAREA QUEST DEBUG] Starting quest integration for wildarea combat',
+    );
+    console.log(
+      '🔍 [WILDAREA QUEST DEBUG] Internal enemies:',
+      internalEnemies.map((e) => ({
+        id: e.id,
+        name: e.name,
+        hp: e.hp,
+        type: e.type,
+      })),
+    );
+
+    const enemyKills: { enemyType: string; count: number }[] = [];
+    const defeatedEnemies = internalEnemies.filter((enemy) => enemy.hp <= 0);
+
+    console.log(
+      '🔍 [WILDAREA QUEST DEBUG] Defeated enemies count:',
+      defeatedEnemies.length,
+    );
+
+    // Group defeated enemies by type for quest tracking
+    const enemyTypeCount = new Map<string, number>();
+    for (const enemy of defeatedEnemies) {
+      // Use monster name instead of type for quest tracking
+      // Quest requirements expect monster names like 'slime', 'goblin', not types like 'normal', 'elite'
+      const enemyType = enemy.name.toLowerCase();
+      enemyTypeCount.set(enemyType, (enemyTypeCount.get(enemyType) || 0) + 1);
+      console.log('🔍 [WILDAREA QUEST DEBUG] Processing defeated enemy:', {
+        name: enemy.name,
+        type: enemy.type,
+        enemyType,
+      });
+    }
+
+    // Convert map to array format expected by quest service
+    for (const [enemyType, count] of enemyTypeCount.entries()) {
+      enemyKills.push({ enemyType, count });
+    }
+
+    console.log(
+      '🔍 [WILDAREA QUEST DEBUG] Final enemy kills data:',
+      enemyKills,
+    );
+
+    // Update quest progress for each user
+    for (const user of users) {
+      try {
+        console.log(
+          '🔍 [WILDAREA QUEST DEBUG] Updating quest progress for user:',
+          user.id,
+        );
+        await this.questService.updateQuestProgressFromCombat(
+          user.id,
+          savedCombat.id,
+          {
+            enemyKills,
+            bossDefeated: false, // wildarea doesn't have bosses typically
+          },
+        );
+        console.log(
+          `✅ [WILDAREA QUEST] Successfully updated quest progress for user ${user.id} - defeated ${enemyKills.length} enemy types`,
+        );
+      } catch (err) {
+        console.error(
+          `❌ [WILDAREA QUEST] Failed to update quest progress for user ${user.id} after wildarea combat:`,
+          err instanceof Error ? err.message : err,
+        );
       }
     }
 

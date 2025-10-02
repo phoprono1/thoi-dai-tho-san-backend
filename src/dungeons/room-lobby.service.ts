@@ -65,7 +65,8 @@ export class RoomLobbyService {
       throw new BadRequestException('Level không đủ để vào hầm ngục này');
     }
 
-    // Nếu dungeon yêu cầu vật phẩm, kiểm tra và tiêu thụ 1 cái
+    // Nếu dungeon yêu cầu vật phẩm, chỉ kiểm tra host có vật phẩm, không tiêu thụ
+    // (Vật phẩm sẽ được tiêu thụ mỗi lần đánh dungeon, không phải khi tạo phòng)
     if (dungeon.requiredItem) {
       try {
         const userItem = await this.userItemsService.findByUserAndItem(
@@ -75,16 +76,6 @@ export class RoomLobbyService {
 
         if (!userItem || (userItem.quantity || 0) <= 0) {
           throw new BadRequestException('Thiếu vật phẩm để vào hầm ngục');
-        }
-
-        const removed = await this.userItemsService.removeItemFromUser(
-          hostId,
-          dungeon.requiredItem,
-          1,
-        );
-
-        if (!removed) {
-          throw new BadRequestException('Không thể tiêu thụ vật phẩm yêu cầu');
         }
       } catch (err) {
         if (err instanceof BadRequestException) throw err;
@@ -299,7 +290,8 @@ export class RoomLobbyService {
     }
 
     // Thêm player vào phòng
-    // Nếu dungeon yêu cầu vật phẩm, kiểm tra và tiêu thụ 1 cái trước khi thêm
+    // Nếu dungeon yêu cầu vật phẩm, chỉ kiểm tra player có vật phẩm, không tiêu thụ
+    // (Vật phẩm sẽ được tiêu thụ mỗi lần đánh dungeon, không phải khi join phòng)
     if (
       room.dungeon &&
       (room.dungeon.requiredItem || room.dungeon.requiredItem === 0)
@@ -313,16 +305,6 @@ export class RoomLobbyService {
           );
           if (!userItem || (userItem.quantity || 0) <= 0) {
             throw new BadRequestException('Thiếu vật phẩm để vào hầm ngục');
-          }
-          const removed = await this.userItemsService.removeItemFromUser(
-            playerId,
-            required,
-            1,
-          );
-          if (!removed) {
-            throw new BadRequestException(
-              'Không thể tiêu thụ vật phẩm yêu cầu',
-            );
           }
         }
       } catch (err) {
@@ -494,6 +476,122 @@ export class RoomLobbyService {
         .join(', ');
       throw new BadRequestException(
         `Một số người chơi chưa sẵn sàng: ${notReadyNames}`,
+      );
+    }
+
+    // Kiểm tra và tiêu thụ item yêu cầu cho từng người chơi (nếu dungeon yêu cầu)
+    if (room.dungeon.requiredItem) {
+      console.log(
+        `[ITEM DEBUG] Room ${roomId} dungeon requires item ${room.dungeon.requiredItem}`,
+      );
+      console.log(`[ITEM DEBUG] Active players count: ${activePlayers.length}`);
+
+      // Kiểm tra tất cả players có đủ item không
+      for (const player of activePlayers) {
+        console.log(
+          `[ITEM DEBUG] ===== Checking player ${player.playerId} (${player.player?.username || 'unknown'}) =====`,
+        );
+
+        // Log item count BEFORE check
+        const beforeItems = await this.userItemsService.findByUserId(
+          player.playerId,
+        );
+        const beforeCount = beforeItems
+          .filter((ui) => ui.itemId === room.dungeon.requiredItem)
+          .reduce((sum, ui) => sum + ui.quantity, 0);
+        console.log(
+          `[ITEM DEBUG] Player ${player.playerId} has ${beforeCount}x item ${room.dungeon.requiredItem} BEFORE any operations`,
+        );
+
+        const userItem = await this.userItemsService.findByUserAndItem(
+          player.playerId,
+          room.dungeon.requiredItem,
+        );
+
+        console.log(
+          `[ITEM DEBUG] findByUserAndItem result for player ${player.playerId}:`,
+          userItem ? { id: userItem.id, quantity: userItem.quantity } : 'null',
+        );
+
+        if (!userItem || (userItem.quantity || 0) <= 0) {
+          console.error(
+            `[ITEM ERROR] Player ${player.playerId} missing required item ${room.dungeon.requiredItem}`,
+          );
+          throw new BadRequestException(
+            `Người chơi ${player.player.username} thiếu vật phẩm để vào hầm ngục`,
+          );
+        }
+      }
+
+      console.log(
+        `[ITEM DEBUG] All players have required items, proceeding to consumption...`,
+      );
+
+      // Nếu tất cả đều có đủ, tiêu thụ item từ mỗi người
+      for (const player of activePlayers) {
+        console.log(
+          `[ITEM DEBUG] ===== Consuming item from player ${player.playerId} (${player.player?.username || 'unknown'}) =====`,
+        );
+
+        // Log item count BEFORE consumption
+        const beforeItems = await this.userItemsService.findByUserId(
+          player.playerId,
+        );
+        const beforeCount = beforeItems
+          .filter((ui) => ui.itemId === room.dungeon.requiredItem)
+          .reduce((sum, ui) => sum + ui.quantity, 0);
+        console.log(
+          `[ITEM DEBUG] Player ${player.playerId} has ${beforeCount}x item ${room.dungeon.requiredItem} BEFORE consumption`,
+        );
+
+        const removed = await this.userItemsService.removeItemFromUser(
+          player.playerId,
+          room.dungeon.requiredItem,
+          1,
+        );
+
+        console.log(
+          `[ITEM DEBUG] removeItemFromUser result for player ${player.playerId}:`,
+          removed,
+        );
+
+        if (!removed) {
+          console.error(
+            `[ITEM ERROR] Failed to remove item ${room.dungeon.requiredItem} from player ${player.playerId}`,
+          );
+          throw new BadRequestException(
+            `Không thể tiêu thụ vật phẩm yêu cầu của ${player.player.username}`,
+          );
+        }
+
+        // Log item count AFTER consumption
+        const afterItems = await this.userItemsService.findByUserId(
+          player.playerId,
+        );
+        const afterCount = afterItems
+          .filter((ui) => ui.itemId === room.dungeon.requiredItem)
+          .reduce((sum, ui) => sum + ui.quantity, 0);
+        console.log(
+          `[ITEM DEBUG] Player ${player.playerId} has ${afterCount}x item ${room.dungeon.requiredItem} AFTER consumption (should be ${beforeCount - 1})`,
+        );
+
+        if (afterCount !== beforeCount - 1) {
+          console.error(
+            `[ITEM ERROR] Item consumption verification FAILED! Expected ${beforeCount - 1}, got ${afterCount}`,
+          );
+        } else {
+          console.log(
+            `[ITEM SUCCESS] Item consumption verified for player ${player.playerId}`,
+          );
+        }
+
+        console.log(
+          `[RoomService] Consumed required item from player ${player.player.username}`,
+        );
+      }
+
+      console.log(
+        `[ITEM DEBUG] ===== Item consumption completed for all players =====`,
       );
     }
 

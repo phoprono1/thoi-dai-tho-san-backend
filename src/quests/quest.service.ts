@@ -854,12 +854,25 @@ export class QuestService {
       collectedItems?: { itemId: number; quantity: number }[];
     },
   ): Promise<void> {
+    console.log(
+      '🎯 [QUEST SERVICE] updateQuestProgressFromCombat called with:',
+      {
+        userId,
+        combatResultId,
+        combatData,
+      },
+    );
+
     // Check if this combat result was already processed for quests
     const existingTracking = await this.questCombatTrackingRepository.findOne({
       where: { userId, combatResultId },
     });
 
     if (existingTracking?.questProgressUpdated) {
+      console.log(
+        '⚠️ [QUEST SERVICE] Combat already processed, skipping:',
+        combatResultId,
+      );
       return; // Already processed
     }
 
@@ -979,25 +992,62 @@ export class QuestService {
 
       // Update enemy kill progress
       if (combatData.enemyKills && quest.requirements.killEnemies) {
+        console.log(
+          '⚔️ [QUEST SERVICE] Processing enemy kills for quest:',
+          quest.id,
+          quest.name,
+        );
+        console.log('Enemy kills data:', combatData.enemyKills);
+        console.log('Quest requirements:', quest.requirements.killEnemies);
+
         const currentProgress = userQuest.progress?.killEnemies || [];
 
         for (const kill of combatData.enemyKills) {
+          console.log('Processing kill:', kill);
           for (const enemyReq of quest.requirements.killEnemies) {
-            if (enemyReq.enemyType === kill.enemyType) {
+            console.log('Checking against requirement:', enemyReq);
+            // Normalize both enemy types to lowercase for comparison
+            const normalizedKillType = kill.enemyType.toLowerCase();
+            const normalizedReqType = enemyReq.enemyType.toLowerCase();
+
+            // Support 'any' enemy type that matches all enemies
+            if (
+              normalizedReqType === 'any' ||
+              normalizedReqType === normalizedKillType
+            ) {
+              console.log(
+                '✅ [QUEST SERVICE] Enemy type match found!',
+                `${enemyReq.enemyType} matches ${kill.enemyType}`,
+              );
+              // For progress tracking, use the quest requirement's enemyType as key
+              // This means 'any' stays as 'any', specific types stay as specific types
               const existingProgress = currentProgress.find(
-                (p) => p.enemyType === kill.enemyType,
+                (p) => p.enemyType === enemyReq.enemyType,
               );
 
               if (existingProgress) {
+                console.log(
+                  `📈 [QUEST SERVICE] Updating existing progress from ${existingProgress.current} to ${existingProgress.current + kill.count}`,
+                );
                 existingProgress.current += kill.count;
               } else {
+                console.log('🆕 [QUEST SERVICE] Creating new progress entry:', {
+                  enemyType: enemyReq.enemyType,
+                  current: kill.count,
+                  required: enemyReq.count,
+                });
                 currentProgress.push({
-                  enemyType: kill.enemyType,
+                  enemyType: enemyReq.enemyType,
                   current: kill.count,
                   required: enemyReq.count,
                 });
               }
               progressUpdated = true;
+            } else {
+              console.log('❌ [QUEST SERVICE] Enemy type mismatch:', {
+                kill: kill.enemyType,
+                requirement: enemyReq.enemyType,
+              });
             }
           }
         }
@@ -1007,7 +1057,19 @@ export class QuestService {
             ...userQuest.progress,
             killEnemies: currentProgress,
           };
+          console.log(
+            '💾 [QUEST SERVICE] Updated killEnemies progress:',
+            currentProgress,
+          );
         }
+      } else {
+        console.log(
+          '⚠️ [QUEST SERVICE] No enemy kills data or no killEnemies requirement',
+          {
+            hasEnemyKills: !!combatData.enemyKills,
+            hasKillEnemiesReq: !!quest.requirements.killEnemies,
+          },
+        );
       }
 
       // Update collected items progress (from combat rewards)
