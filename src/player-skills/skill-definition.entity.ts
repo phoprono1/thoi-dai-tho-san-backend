@@ -188,6 +188,7 @@ export class SkillDefinition {
       damageType: this.damageType,
       damageFormula: this.damageFormula,
       healingFormula: this.healingFormula,
+      image: this.image, // ✅ ADD THIS
     };
   }
 }

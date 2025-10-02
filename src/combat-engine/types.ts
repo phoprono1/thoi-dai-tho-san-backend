@@ -35,7 +35,7 @@ export interface SkillData {
   name: string;
   skillType: 'passive' | 'active' | 'toggle';
   manaCost?: number;
-  cooldown?: number;
+  cooldown?: number; // ⚠️ NOW IN TURNS (not seconds)
   targetType?: 'self' | 'enemy' | 'ally' | 'aoe_enemies' | 'aoe_allies';
   damageType?: 'physical' | 'magical';
   damageFormula?: string;
@@ -82,6 +82,9 @@ export interface CombatLogEntry {
   healing?: number;
   hpBefore: number;
   hpAfter: number;
+  manaBefore?: number; // ✅ NEW: Mana before action (for skills)
+  manaAfter?: number; // ✅ NEW: Mana after action (for skills)
+  manaCost?: number; // ✅ NEW: Mana cost of skill
   flags?: {
     crit?: boolean;
     lifesteal?: number;

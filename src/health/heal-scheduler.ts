@@ -40,6 +40,7 @@ export class HealScheduler {
           'id',
           'userId',
           'currentHp',
+          'currentMana', // ✅ Add mana to selection
           'strength',
           'intelligence',
           'dexterity',
@@ -64,7 +65,7 @@ export class HealScheduler {
               await this.userStatsService.getTotalStatsWithAllBonuses(
                 userStat.userId,
               );
-            // Tính maxHp động
+            // Tính maxHp và maxMana động
             const combatStats = deriveCombatStats({
               baseMaxHp: 100,
               strength: totalStats.str,
@@ -74,10 +75,28 @@ export class HealScheduler {
               luck: totalStats.luk,
             });
             const maxHp = combatStats.maxHp;
+            const maxMana = combatStats.maxMana;
+
+            // Hồi HP nếu chưa đầy
+            const updates: Partial<UserStat> = {};
             if (userStat.currentHp < maxHp) {
               const healAmount = Math.floor(maxHp * 0.1);
-              const newHp = Math.min(userStat.currentHp + healAmount, maxHp);
-              await this.userStatRepo.update(userStat.id, { currentHp: newHp });
+              updates.currentHp = Math.min(
+                userStat.currentHp + healAmount,
+                maxHp,
+              );
+            }
+
+            // Hồi Mana nếu chưa đầy (10% maxMana)
+            const currentMana = userStat.currentMana ?? maxMana;
+            if (currentMana < maxMana) {
+              const manaRegen = Math.floor(maxMana * 0.1);
+              updates.currentMana = Math.min(currentMana + manaRegen, maxMana);
+            }
+
+            // Update nếu có thay đổi
+            if (Object.keys(updates).length > 0) {
+              await this.userStatRepo.update(userStat.id, updates);
             }
           } catch (err) {
             this.logger.error(

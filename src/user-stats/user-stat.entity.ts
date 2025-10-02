@@ -25,6 +25,10 @@ export class UserStat {
   @Column({ default: 100 })
   currentHp: number;
 
+  // Current Mana (persisted across combats - strategic resource)
+  @Column({ nullable: true, default: null })
+  currentMana: number | null; // NULL = will be initialized to maxMana on first combat
+
   // Core attributes - only these are persisted
   @Column({ default: 10 })
   strength: number; // Sức mạnh

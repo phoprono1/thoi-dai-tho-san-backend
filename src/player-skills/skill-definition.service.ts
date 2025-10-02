@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   NotFoundException,
@@ -124,6 +127,17 @@ export class SkillDefinitionService {
     if (data.sortOrder !== undefined) skill.sortOrder = data.sortOrder;
     if (data.category !== undefined) skill.category = data.category;
     if (data.image !== undefined) skill.image = data.image; // Support image upload
+
+    // Update active skill fields
+    if (data.skillType !== undefined) skill.skillType = data.skillType;
+    if (data.manaCost !== undefined) skill.manaCost = data.manaCost;
+    if (data.cooldown !== undefined) skill.cooldown = data.cooldown;
+    if (data.targetType !== undefined) skill.targetType = data.targetType;
+    if (data.damageType !== undefined) skill.damageType = data.damageType;
+    if (data.damageFormula !== undefined)
+      skill.damageFormula = data.damageFormula;
+    if (data.healingFormula !== undefined)
+      skill.healingFormula = data.healingFormula;
 
     return this.skillDefinitionRepository.save(skill);
   }

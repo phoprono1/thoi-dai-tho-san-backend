@@ -325,6 +325,7 @@ export class CombatResultsService {
           id: u.id,
           username: u.username,
           maxHp: u.stats?.currentHp, // Only currentHp exists now
+          currentMana: u.stats?.currentMana, // Check if mana persists from DB
         })),
       );
     } catch {
@@ -455,6 +456,9 @@ export class CombatResultsService {
           isMiss: !!l.flags?.dodge || l.type === 'miss',
           hpBefore: l.hpBefore,
           hpAfter: l.hpAfter,
+          manaBefore: l.manaBefore, // ✅ Add mana tracking for frontend animation
+          manaAfter: l.manaAfter,
+          manaCost: l.manaCost,
           description: l.description,
           effects,
         },
@@ -546,7 +550,7 @@ export class CombatResultsService {
       }
     }
 
-    // Update user HP after combat
+    // Update user HP and Mana after combat
     for (let i = 0; i < users.length; i++) {
       const user = users[i];
       const finalHp =
@@ -559,6 +563,24 @@ export class CombatResultsService {
         } catch (err) {
           console.warn(
             `Failed to update HP for user ${user.id} after combat:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+
+      // Persist currentMana after combat (strategic resource management)
+      const finalMana = combatResult.finalPlayers[i]?.stats?.currentMana;
+      if (finalMana !== undefined && finalMana !== user.stats.currentMana) {
+        try {
+          await this.userStatsService.updateByUserId(user.id, {
+            currentMana: finalMana,
+          });
+          console.log(
+            `✅ Persisted mana for user ${user.id}: ${finalMana}/${combatResult.finalPlayers[i]?.stats?.maxMana}`,
+          );
+        } catch (err) {
+          console.warn(
+            `Failed to update mana for user ${user.id} after combat:`,
             err instanceof Error ? err.message : err,
           );
         }
@@ -754,7 +776,25 @@ export class CombatResultsService {
 
       console.log(
         `✅ [startCombatWithEnemies] User ${u.id} has ${activeSkills.length} active skills:`,
-        activeSkills.map((s) => s.name),
+      );
+      activeSkills.forEach((s) => {
+        console.log(
+          `   - ${s.name}: manaCost=${s.manaCost}, cooldown=${s.cooldown}, type=${s.skillType}`,
+        );
+      });
+
+      // Initialize currentMana if NULL (first combat)
+      const currentMana = u.stats.currentMana ?? derivedStats.maxMana;
+
+      console.log(
+        `🔍 [BEFORE SET] User ${u.id} (${u.username}) - DB currentMana: ${u.stats.currentMana}, derivedStats.currentMana: ${derivedStats.currentMana}, will set to: ${currentMana}`,
+      );
+
+      // Update stats with initialized currentMana
+      derivedStats.currentMana = currentMana;
+
+      console.log(
+        `✅ [AFTER SET] User ${u.id} (${u.username}) - derivedStats.currentMana: ${derivedStats.currentMana}`,
       );
 
       return {
@@ -765,6 +805,13 @@ export class CombatResultsService {
         currentHp: u.stats.currentHp,
         skills: activeSkills,
         skillCooldowns: {}, // Initialize empty cooldowns
+        metadata: {
+          totalIntelligence: coreAttrs.INT,
+          totalStrength: coreAttrs.STR,
+          totalDexterity: coreAttrs.DEX,
+          totalVitality: coreAttrs.VIT,
+          totalLuck: coreAttrs.LUK,
+        },
       };
     });
 
@@ -814,6 +861,10 @@ export class CombatResultsService {
         username: user.username,
         hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
         maxHp: playerInputs[idx].stats.maxHp,
+        currentMana:
+          run.finalPlayers[idx]?.stats?.currentMana ??
+          playerInputs[idx].stats.currentMana,
+        maxMana: playerInputs[idx].stats.maxMana,
       })),
     };
 
@@ -866,6 +917,7 @@ export class CombatResultsService {
       enemies: finalEnemies,
       internalEnemies,
       originalEnemies: originalInternalEnemies,
+      finalPlayers: run.finalPlayers, // ✅ ADD: Needed for mana persistence
       seedUsed: (run as any).seedUsed ?? null,
     } as any;
 
@@ -935,6 +987,9 @@ export class CombatResultsService {
           isMiss: !!l.flags?.dodge || (l.type ?? l.action) === 'miss',
           hpBefore: l.hpBefore,
           hpAfter: l.hpAfter,
+          manaBefore: l.manaBefore, // ✅ Add mana tracking
+          manaAfter: l.manaAfter,
+          manaCost: l.manaCost,
           description: l.description,
           effects,
         },
@@ -1079,7 +1134,7 @@ export class CombatResultsService {
       }
     }
 
-    // Update user HP after combat
+    // Update user HP and Mana after combat
     for (let i = 0; i < users.length; i++) {
       const user = users[i];
       const finalHp =
@@ -1092,6 +1147,24 @@ export class CombatResultsService {
         } catch (err) {
           console.warn(
             `Failed to update HP for user ${user.id} after combat:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+
+      // Persist currentMana after combat (strategic resource management)
+      const finalMana = combatResult.finalPlayers[i]?.stats?.currentMana;
+      if (finalMana !== undefined && finalMana !== user.stats.currentMana) {
+        try {
+          await this.userStatsService.updateByUserId(user.id, {
+            currentMana: finalMana,
+          });
+          console.log(
+            `✅ [WILDAREA] Persisted mana for user ${user.id}: ${finalMana}/${combatResult.finalPlayers[i]?.stats?.maxMana}`,
+          );
+        } catch (err) {
+          console.warn(
+            `Failed to update mana for user ${user.id} after combat:`,
             err instanceof Error ? err.message : err,
           );
         }
@@ -1174,6 +1247,14 @@ export class CombatResultsService {
       console.log(
         `✅ User ${u.id} has ${activeSkills.length} active skills:`,
         activeSkills.map((s) => s.name),
+      );
+
+      // Initialize currentMana from DB (persisted value), fallback to maxMana for first combat
+      const currentMana = u.stats.currentMana ?? derivedStats.maxMana;
+      derivedStats.currentMana = currentMana;
+
+      console.log(
+        `🔍 [PROCESS TEAM] User ${u.id} (${u.username}) - DB currentMana: ${u.stats.currentMana}, maxMana: ${derivedStats.maxMana}, using: ${currentMana}`,
       );
 
       return {
@@ -1297,6 +1378,10 @@ export class CombatResultsService {
         username: user.username,
         hp: run.finalPlayers[idx]?.currentHp ?? user.stats.currentHp,
         maxHp: playerInputs[idx].stats.maxHp,
+        currentMana:
+          run.finalPlayers[idx]?.stats?.currentMana ??
+          playerInputs[idx].stats.currentMana,
+        maxMana: playerInputs[idx].stats.maxMana,
       })),
     };
 
@@ -1328,6 +1413,7 @@ export class CombatResultsService {
       enemies: finalEnemies,
       internalEnemies,
       originalEnemies: originalInternalEnemies,
+      finalPlayers: run.finalPlayers, // ✅ ADD: Needed for mana persistence
       // expose the RNG seed used so callers can persist and replay
       seedUsed: (run as any).seedUsed ?? null,
     } as any;

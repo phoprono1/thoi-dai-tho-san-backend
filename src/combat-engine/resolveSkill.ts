@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { CombatActorInput, CombatLogEntry, SkillData } from './types';
 import { evaluate } from 'mathjs';
 
@@ -20,9 +22,19 @@ export function resolveSkill(
   const rng = options.rng;
 
   try {
-    // Check mana cost
-    const manaCost = skill.manaCost || 0;
+    // Check mana cost - active skills default to 10 if not specified
+    const manaCost = skill.skillType === 'active' ? (skill.manaCost ?? 10) : 0;
     const currentMana = caster.stats.currentMana ?? caster.stats.maxMana;
+
+    console.log(`🔷 [MANA DEBUG] ${caster.name} using skill "${skill.name}":`);
+    console.log(`   🆔 Received caster._debugId = ${(caster as any)._debugId}`);
+    console.log(`   📍 caster.stats object reference: ${typeof caster.stats}`);
+    console.log(`   - Skill Type: ${skill.skillType}`);
+    console.log(`   - Skill manaCost field: ${skill.manaCost}`);
+    console.log(`   - Calculated manaCost: ${manaCost}`);
+    console.log(`   - Current Mana: ${currentMana}`);
+    console.log(`   - Max Mana: ${caster.stats.maxMana}`);
+
     if (currentMana < manaCost) {
       // Not enough mana - this shouldn't happen if properly validated, but log it
       logs.push({
@@ -43,7 +55,15 @@ export function resolveSkill(
     }
 
     // Consume mana
-    caster.stats.currentMana = currentMana - manaCost;
+    const newMana = currentMana - manaCost;
+    caster.stats.currentMana = newMana;
+
+    console.log(
+      `   ✅ Mana consumed! ${currentMana} → ${newMana} (-${manaCost})`,
+    );
+    console.log(
+      `   📊 After mutation: caster.stats.currentMana = ${caster.stats.currentMana}`,
+    );
 
     const effect = skill.effects[skill.level] || skill.effects[1];
     if (!effect) {
@@ -98,6 +118,9 @@ export function resolveSkill(
           damage,
           hpBefore,
           hpAfter,
+          manaBefore: currentMana, // ✅ NEW: Track mana changes
+          manaAfter: caster.stats.currentMana,
+          manaCost: manaCost,
           description: `${caster.name} sử dụng ${skill.name} gây ${damage} sát thương ${skill.damageType || 'physical'} lên ${target.name}`,
         } as CombatLogEntry;
         logs.push(logEntry);
@@ -131,6 +154,9 @@ export function resolveSkill(
           healing,
           hpBefore,
           hpAfter,
+          manaBefore: currentMana, // ✅ NEW: Track mana changes
+          manaAfter: caster.stats.currentMana,
+          manaCost: manaCost,
           description: `${caster.name} sử dụng ${skill.name} hồi ${healing} HP cho ${target.name}`,
         } as CombatLogEntry);
       } else if (effect.debuffDuration) {
@@ -188,8 +214,14 @@ function calculateSkillDamage(
   if (skill.damageFormula) {
     try {
       // Use mathjs for safe formula evaluation
+      // Provide all common attributes for formula flexibility
       const scope = {
-        INT: caster.stats.attack, // Using attack as INT proxy
+        INT: caster.metadata?.totalIntelligence || caster.stats.attack, // Prefer totalIntelligence from metadata
+        STR: caster.metadata?.totalStrength || 10,
+        DEX: caster.metadata?.totalDexterity || 10,
+        VIT: caster.metadata?.totalVitality || 10,
+        LUK: caster.metadata?.totalLuck || 10,
+        attack: caster.stats.attack,
         level: skill.level,
       };
       damage = evaluate(skill.damageFormula, scope) as number;
@@ -233,8 +265,14 @@ function calculateSkillHealing(
   if (skill.healingFormula) {
     try {
       // Use mathjs for safe formula evaluation
+      // Provide all common attributes for formula flexibility
       const scope = {
-        INT: caster.stats.attack, // Using attack as INT proxy
+        INT: caster.metadata?.totalIntelligence || caster.stats.attack,
+        STR: caster.metadata?.totalStrength || 10,
+        DEX: caster.metadata?.totalDexterity || 10,
+        VIT: caster.metadata?.totalVitality || 10,
+        LUK: caster.metadata?.totalLuck || 10,
+        attack: caster.stats.attack,
         level: skill.level,
       };
       healing = evaluate(skill.healingFormula, scope) as number;

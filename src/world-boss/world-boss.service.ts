@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -37,6 +38,8 @@ import { runCombat } from '../combat-engine/engine';
 import { CombatActorInput } from '../combat-engine/types';
 import { WorldBossGateway } from './world-boss.gateway';
 import { SkillService } from '../player-skills/skill.service';
+import { UserItemsService } from '../user-items/user-items.service';
+import { LevelsService } from '../levels/levels.service';
 
 @Injectable()
 export class WorldBossService {
@@ -66,6 +69,8 @@ export class WorldBossService {
     private mailboxRepository: Repository<Mailbox>,
     private dataSource: DataSource,
     private skillService: SkillService,
+    private userItemsService: UserItemsService,
+    private levelsService: LevelsService,
   ) {}
 
   // Inject gateway after construction to avoid circular dependency
@@ -221,23 +226,106 @@ export class WorldBossService {
     };
   }
 
+  /**
+   * Calculate total core attributes including base stats, level bonuses, class bonuses, and equipment bonuses
+   * This ensures world boss combat uses the same stat calculation as other combat modes
+   */
+  private async calculateTotalCoreAttributes(userId: number): Promise<{
+    STR: number;
+    INT: number;
+    DEX: number;
+    VIT: number;
+    LUK: number;
+  }> {
+    // Get user with relations
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['stats', 'characterClass'],
+    });
+
+    if (!user || !user.stats) {
+      throw new Error(`User ${userId} not found or has no stats`);
+    }
+
+    // Base core attributes
+    let totalSTR = user.stats.strength;
+    let totalINT = user.stats.intelligence;
+    let totalDEX = user.stats.dexterity;
+    let totalVIT = user.stats.vitality;
+    let totalLUK = user.stats.luck;
+
+    // Level bonuses (cumulative from level 1 to current level)
+    const levelBonuses = await this.levelsService.getTotalLevelStats(
+      user.level,
+    );
+    if (levelBonuses) {
+      totalSTR += levelBonuses.strength || 0;
+      totalINT += levelBonuses.intelligence || 0;
+      totalDEX += levelBonuses.dexterity || 0;
+      totalVIT += levelBonuses.vitality || 0;
+      totalLUK += levelBonuses.luck || 0;
+    }
+
+    // Character class bonuses
+    if (user.characterClass?.statBonuses) {
+      totalSTR += user.characterClass.statBonuses.strength || 0;
+      totalINT += user.characterClass.statBonuses.intelligence || 0;
+      totalDEX += user.characterClass.statBonuses.dexterity || 0;
+      totalVIT += user.characterClass.statBonuses.vitality || 0;
+      totalLUK += user.characterClass.statBonuses.luck || 0;
+    }
+
+    // Equipment bonuses
+    const equippedItems = await this.userItemsService.findByUserId(userId);
+    for (const userItem of equippedItems) {
+      if (userItem.isEquipped && userItem.item?.stats) {
+        totalSTR += userItem.item.stats.strength || 0;
+        totalINT += userItem.item.stats.intelligence || 0;
+        totalDEX += userItem.item.stats.dexterity || 0;
+        totalVIT += userItem.item.stats.vitality || 0;
+        totalLUK += userItem.item.stats.luck || 0;
+      }
+    }
+
+    return {
+      STR: totalSTR,
+      INT: totalINT,
+      DEX: totalDEX,
+      VIT: totalVIT,
+      LUK: totalLUK,
+    };
+  }
+
   private async runBossCombat(
     user: User,
     userStats: UserStat,
     boss: WorldBossResponseDto,
   ) {
-    // Convert user stats to combat format using base attributes
+    // 🔧 FIX: Get TOTAL attributes including equipment, level, and class bonuses
+    const totalAttributes = await this.calculateTotalCoreAttributes(user.id);
+
+    // Get passive skill bonuses
+    const skillEffects = await this.skillService.getPlayerSkillEffects(user.id);
+
+    // Convert to combat stats with proper bonuses
     const playerStats = deriveCombatStats({
-      // Use base attributes from UserStat
-      STR: userStats.strength + userStats.strengthPoints,
-      INT: userStats.intelligence + userStats.intelligencePoints,
-      DEX: userStats.dexterity + userStats.dexterityPoints,
-      VIT: userStats.vitality + userStats.vitalityPoints,
-      LUK: userStats.luck + userStats.luckPoints,
+      baseAttack: 10,
+      baseMaxHp: 100,
+      baseDefense: 5,
+      ...totalAttributes,
     });
 
-    // Set current HP from UserStat
-    playerStats.currentMana = playerStats.maxMana;
+    // Apply skill bonuses to derived stats
+    playerStats.attack += skillEffects.statBonuses.attack || 0;
+    playerStats.defense += skillEffects.statBonuses.defense || 0;
+    playerStats.maxHp += skillEffects.statBonuses.maxHp || 0;
+    playerStats.critRate += skillEffects.statBonuses.critRate || 0;
+    playerStats.critDamage += skillEffects.statBonuses.critDamage || 0;
+    playerStats.dodgeRate += skillEffects.statBonuses.dodgeRate || 0;
+
+    // Set current HP and Mana from UserStat
+    const currentHp = userStats.currentHp;
+    playerStats.currentMana = userStats.currentMana ?? playerStats.maxMana;
 
     // Get user's active skills for combat
     const userSkills = await this.skillService.getPlayerSkills(user.id);
@@ -293,7 +381,7 @@ export class WorldBossService {
       name: user.username,
       isPlayer: true,
       stats: playerStats,
-      currentHp: playerStats.maxHp,
+      currentHp: currentHp,
       skills: activeSkills,
       skillCooldowns: {},
     };

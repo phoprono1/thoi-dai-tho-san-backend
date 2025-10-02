@@ -1,12 +1,13 @@
 import { CombatStats } from './types';
 
-const CONFIG = {
+export const CONFIG = {
   p: 0.94,
   atk_from_STR: 0.45,
   atk_from_INT: 0.6,
   atk_from_DEX: 0.18,
   hp_from_VIT: 12,
   def_from_VIT: 0.5,
+  mana_from_INT: 10, // Mana scaling: baseMana + 10 * effective(INT)
   critRate_from_LUK: 0.28,
   critDamage_from_LUK: 0.15,
   dodge_from_DEX: 0.25,
@@ -16,6 +17,8 @@ const CONFIG = {
   combo_from_DEX: 0.08,
   maxCritRate: 75,
   dodgeCap: 70,
+  baseMana: 50, // Base mana for all characters
+  manaRegenPerTurn: 0.1, // Regen 10% maxMana per turn
 };
 
 export function effective(attr: number, p = CONFIG.p) {
@@ -26,6 +29,7 @@ export function deriveCombatStats(core: {
   baseAttack?: number;
   baseMaxHp?: number;
   baseDefense?: number;
+  baseMana?: number;
   STR?: number;
   VIT?: number;
   DEX?: number;
@@ -47,6 +51,7 @@ export function deriveCombatStats(core: {
   const baseAttack = core.baseAttack ?? 10;
   const baseMaxHp = core.baseMaxHp ?? 100;
   const baseDefense = core.baseDefense ?? 5;
+  const baseMana = core.baseMana ?? CONFIG.baseMana;
 
   const s = effective(
     (core.STR ?? core.strength ?? 0) + (core.strengthPoints ?? 0),
@@ -86,10 +91,9 @@ export function deriveCombatStats(core: {
   const comboRate = CONFIG.combo_from_DEX * d || 0;
   const counterRate = 0;
 
-  const maxMana = Math.max(
-    50,
-    Math.floor(((core.INT ?? 0) + (core.intelligencePoints ?? 0)) * 10),
-  );
+  // Mana formula: baseMana + mana_from_INT * effective(INT)
+  // Same pattern as HP: baseMaxHp + hp_from_VIT * effective(VIT)
+  const maxMana = Math.floor(baseMana + CONFIG.mana_from_INT * i);
 
   return {
     maxHp,

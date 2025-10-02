@@ -48,8 +48,8 @@ export class QuestService {
   }
 
   async getAllQuests(): Promise<Quest[]> {
+    // Admin needs to see ALL quests including inactive ones for management
     return this.questRepository.find({
-      where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -63,11 +63,15 @@ export class QuestService {
     // had their rewards claimed. This prevents the API from showing
     // quests that the client already claimed (they can still reappear
     // after a full refresh if needed, e.g., daily resets).
+    // IMPORTANT: Only return quests where quest.isActive = true (users should not see inactive quests)
     const all = await this.userQuestRepository.find({
       where: { userId },
       relations: ['quest'],
       order: { createdAt: 'DESC' },
     });
+
+    // Filter out inactive quests - users should only see active quests
+    const activeUserQuests = all.filter((uq) => uq.quest && uq.quest.isActive);
 
     // Ensure the user has rows for all currently active quests (especially
     // daily quests). In some situations (legacy data, manual DB edits, or
@@ -75,7 +79,10 @@ export class QuestService {
     // users. Create missing user_quests with AVAILABLE status so the API
     // returns them immediately.
     try {
-      const existingQuestIds = new Set(all.map((uq) => uq.questId));
+      const existingQuestIds = new Set(
+        activeUserQuests.map((uq) => uq.questId),
+      );
+      // Only auto-assign ACTIVE quests to users
       const missingQuests = await this.questRepository.find({
         where: { isActive: true },
       });
@@ -148,7 +155,7 @@ export class QuestService {
     // ensures users who hit the server after a missed cron still get fresh
     // daily quests.
     const today = new Date().toDateString();
-    for (const uq of all) {
+    for (const uq of activeUserQuests) {
       try {
         if (uq.quest && uq.quest.type === QuestType.DAILY) {
           // lastResetDate may come back from the DB as a string (YYYY-MM-DD)
@@ -182,6 +189,11 @@ export class QuestService {
       order: { createdAt: 'DESC' },
     });
 
+    // Filter out inactive quests after refresh
+    const activeRefreshed = refreshed.filter(
+      (uq) => uq.quest && uq.quest.isActive,
+    );
+
     // Load user to respect their current level when deciding which
     // AVAILABLE quests to expose. We still return in-progress and
     // completed quests regardless of requiredLevel so that players can
@@ -189,7 +201,7 @@ export class QuestService {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     const userLevel = user?.level || 0;
 
-    return refreshed.filter((uq) => {
+    return activeRefreshed.filter((uq) => {
       // Always hide fully completed+claimed quests
       if (uq.status === QuestStatus.COMPLETED && uq.rewardsClaimed === true)
         return false;

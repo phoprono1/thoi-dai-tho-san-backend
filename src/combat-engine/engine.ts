@@ -16,11 +16,21 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
   const seedUsed = (rng as any).seed;
 
   // clone inputs to avoid mutation
-  const players: CombatActorInput[] = params.players.map((p) => ({
-    ...p,
-    currentHp: p.currentHp ?? p.stats.maxHp,
-    skillCooldowns: { ...(p.skillCooldowns || {}) }, // clone cooldowns
-  }));
+  const players: CombatActorInput[] = params.players.map((p, idx) => {
+    console.log(
+      `🔍 [ENGINE INIT] Player ${p.name} received stats.currentMana = ${p.stats.currentMana}, maxMana = ${p.stats.maxMana}`,
+    );
+    return {
+      ...p,
+      currentHp: p.currentHp ?? p.stats.maxHp,
+      stats: {
+        ...p.stats,
+        currentMana: p.stats.currentMana ?? p.stats.maxMana, // ← INITIALIZE currentMana!
+      },
+      skillCooldowns: { ...(p.skillCooldowns || {}) }, // clone cooldowns
+      _debugId: `player_${idx}_${Date.now()}`, // Unique ID for tracking
+    };
+  });
   const enemies: CombatActorInput[] = params.enemies.map((e) => ({
     ...e,
     currentHp: e.currentHp ?? e.stats.maxHp,
@@ -44,7 +54,7 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
       const availableSkills = (p.skills || []).filter(
         (s) =>
           s.skillType === 'active' &&
-          (p.stats.currentMana ?? p.stats.maxMana) >= (s.manaCost || 0) &&
+          (p.stats.currentMana ?? p.stats.maxMana) >= (s.manaCost ?? 10) &&
           !(p.skillCooldowns?.[s.id] && p.skillCooldowns[s.id] > 0) &&
           checkSkillConditions(s.conditions, p, aliveEnemies, turn),
       );
@@ -52,6 +62,10 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
       console.log(
         `Player ${p.name} has ${p.skills?.length || 0} skills, available active skills: ${availableSkills.length}, mana: ${p.stats.currentMana ?? p.stats.maxMana}`,
       );
+      console.log(
+        `   🔍 DEBUG: p.stats.currentMana actual value = ${p.stats.currentMana}`,
+      );
+      console.log(`   🆔 DEBUG: p._debugId = ${(p as any)._debugId}`);
 
       let usedSkill = false;
       if (availableSkills.length > 0) {
@@ -60,6 +74,9 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
         const target =
           aliveEnemies[Math.floor(rng.next() * aliveEnemies.length)];
 
+        console.log(
+          `   📤 Passing player to resolveSkill: ${(p as any)._debugId}`,
+        );
         const res = resolveSkill(p, skill, target, {
           rng,
           turn,
@@ -93,17 +110,6 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
       }
     }
 
-    // Reduce skill cooldowns for all players at end of turn
-    for (const p of players) {
-      if (p.skillCooldowns) {
-        for (const skillId in p.skillCooldowns) {
-          if (p.skillCooldowns[skillId] > 0) {
-            p.skillCooldowns[skillId]--;
-          }
-        }
-      }
-    }
-
     // enemies act
     for (const e of enemies) {
       if ((e.currentHp ?? 0) <= 0) continue;
@@ -117,6 +123,30 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
         actionOrderStart: logs.length + 1,
       });
       logs.push(...res.logs);
+    }
+
+    // Reduce skill cooldowns and regenerate mana for all players at end of turn (after both players and enemies acted)
+    for (const p of players) {
+      if (p.skillCooldowns) {
+        for (const skillId in p.skillCooldowns) {
+          if (p.skillCooldowns[skillId] > 0) {
+            p.skillCooldowns[skillId]--;
+          }
+        }
+      }
+
+      // Regenerate mana (10% of maxMana per turn)
+      const maxMana = p.stats.maxMana || 100;
+      const currentMana =
+        typeof p.stats.currentMana === 'number' ? p.stats.currentMana : maxMana; // Only use maxMana if currentMana is not a number
+      const regenAmount = Math.floor(maxMana * 0.1);
+      const newMana = Math.min(maxMana, currentMana + regenAmount);
+
+      console.log(
+        `   🔋 Mana regen for ${p.name}: ${currentMana} + ${regenAmount} = ${newMana} (max: ${maxMana})`,
+      );
+
+      p.stats.currentMana = newMana;
     }
 
     turn++;

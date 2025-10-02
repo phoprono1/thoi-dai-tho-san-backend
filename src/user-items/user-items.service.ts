@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Injectable,
@@ -642,6 +643,10 @@ export class UserItemsService {
         result = await this.useHpPotion(userItem, user);
         break;
 
+      case ConsumableType.MANA_POTION: // ✅ NEW: Mana potion logic
+        result = await this.useManaPotion(userItem, user);
+        break;
+
       case ConsumableType.MP_POTION:
       case ConsumableType.ENERGY_POTION:
         result = await this.useEnergyPotion(userItem, user);
@@ -729,6 +734,63 @@ export class UserItemsService {
         healAmount: newHp - oldHp,
         newHp: newHp,
         maxHp: maxHp,
+      },
+    };
+  }
+
+  private async useManaPotion(
+    userItem: UserItem,
+    user: User,
+  ): Promise<{ success: boolean; message: string; effects: any }> {
+    const userStats = await this.userStatsService.findByUserId(user.id);
+    if (!userStats) {
+      throw new BadRequestException(
+        'Không tìm thấy thông tin stats của người chơi',
+      );
+    }
+
+    // Calculate max mana
+    const totalStats = await this.userStatsService.getTotalStatsWithAllBonuses(
+      user.id,
+    );
+    const derivedStats = deriveCombatStats({
+      baseAttack: 10,
+      baseMaxHp: 100,
+      baseDefense: 5,
+      STR: totalStats.str,
+      INT: totalStats.int,
+      DEX: totalStats.dex,
+      VIT: totalStats.vit,
+      LUK: totalStats.luk,
+    });
+    const maxMana = derivedStats.maxMana;
+    const currentMana = userStats.currentMana ?? maxMana;
+
+    // Check if mana is already full
+    if (currentMana >= maxMana) {
+      throw new BadRequestException(
+        'Mana đã đầy, không cần sử dụng bình hồi mana',
+      );
+    }
+
+    // Use mana from consumableValue, fallback to intelligence * 5 or default 50
+    const restoreAmount =
+      userItem.item.consumableValue ||
+      (userItem.item.stats?.intelligence || 0) * 5 ||
+      50; // Default 50 mana
+    const newMana = Math.min(maxMana, currentMana + restoreAmount);
+
+    await this.userStatsService.update(userStats.id, {
+      currentMana: newMana,
+    });
+
+    return {
+      success: true,
+      message: `Đã hồi ${newMana - currentMana} mana`,
+      effects: {
+        manaRestored: newMana - currentMana,
+        newMana: newMana,
+        maxMana: maxMana,
       },
     };
   }
