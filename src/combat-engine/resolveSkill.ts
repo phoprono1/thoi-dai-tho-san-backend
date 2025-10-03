@@ -88,9 +88,10 @@ export function resolveSkill(
 
     // Handle different skill types
     if (skill.skillType === 'active') {
-      if (effect.damage) {
-        // Damage skill
-        const baseDamage = effect.damage;
+      // Check if skill has damage (from effect or damageFormula)
+      if (effect.damage || skill.damageFormula) {
+        // Damage skill - use effect.damage as base, or 0 if only formula exists
+        const baseDamage = effect.damage || 0;
         const damage = calculateSkillDamage(
           skill,
           caster,
@@ -124,9 +125,9 @@ export function resolveSkill(
           description: `${caster.name} sử dụng ${skill.name} gây ${damage} sát thương ${skill.damageType || 'physical'} lên ${target.name}`,
         } as CombatLogEntry;
         logs.push(logEntry);
-      } else if (effect.healing) {
-        // Healing skill
-        const baseHealing = effect.healing;
+      } else if (effect.healing || skill.healingFormula) {
+        // Healing skill - use effect.healing as base, or 0 if only formula exists
+        const baseHealing = effect.healing || 0;
         const healing = calculateSkillHealing(
           skill,
           caster,
