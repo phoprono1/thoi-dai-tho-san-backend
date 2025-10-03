@@ -301,6 +301,7 @@ export class UsersService {
     let totalAttributePointsToGrant = 0;
 
     // Loop to level up multiple times if exp allows
+    // CUMULATIVE SYSTEM: experienceRequired = TOTAL exp needed from level 1
     while (true) {
       // Lấy thông tin level tiếp theo
       const nextLevel = await this.levelsService.getNextLevel(user.level);
@@ -308,14 +309,15 @@ export class UsersService {
         break; // Max level reached
       }
 
-      // Kiểm tra có đủ kinh nghiệm không
+      // CUMULATIVE: Check if total exp >= threshold for next level
+      // No subtraction needed - exp stays as total accumulated
       if (user.experience < nextLevel.experienceRequired) {
         break; // Not enough exp
       }
 
-      // Tăng level và trừ experience cần thiết
+      // Tăng level (KHÔNG trừ experience - đây là cumulative system)
       user.level += 1;
-      user.experience -= nextLevel.experienceRequired;
+      // Note: user.experience stays the same (total accumulated exp)
 
       // Accumulate attribute points from this level's reward
       totalAttributePointsToGrant += nextLevel.attributePointsReward || 0;

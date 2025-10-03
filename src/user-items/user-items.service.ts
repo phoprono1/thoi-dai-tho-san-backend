@@ -846,15 +846,17 @@ export class UserItemsService {
     });
     if (!updatedUser) updatedUser = user;
 
+    // CUMULATIVE SYSTEM: experienceRequired = total exp needed from level 1
     while (true) {
       const nextLevel = await this.levelsService.getNextLevel(
         updatedUser.level,
       );
       if (!nextLevel) break;
+      // CUMULATIVE: Check if total exp >= threshold for next level
       if (updatedUser.experience >= nextLevel.experienceRequired) {
-        // Lên cấp!
+        // Lên cấp! (KHÔNG trừ exp - cumulative system)
         updatedUser.level = nextLevel.level;
-        updatedUser.experience -= nextLevel.experienceRequired;
+        // Note: updatedUser.experience stays the same (total accumulated)
         leveledUp = true;
         newLevel = updatedUser.level;
         skillPointsGained += 1; // Count skill points (1 per level)

@@ -57,62 +57,18 @@ export class CombatResultsService {
     VIT: number;
     LUK: number;
   }> {
-    // Get user with relations
-    const user = await this.usersRepository.findOne({
-      where: { id: userId },
-      relations: ['stats', 'characterClass'],
-    });
-
-    if (!user || !user.stats) {
-      throw new Error(`User ${userId} not found or has no stats`);
-    }
-
-    // Base core attributes
-    let totalSTR = user.stats.strength;
-    let totalINT = user.stats.intelligence;
-    let totalDEX = user.stats.dexterity;
-    let totalVIT = user.stats.vitality;
-    let totalLUK = user.stats.luck;
-
-    // Level bonuses (cumulative from level 1 to current level)
-    const levelBonuses = await this.levelsService.getTotalLevelStats(
-      user.level,
-    );
-    if (levelBonuses) {
-      totalSTR += levelBonuses.strength || 0;
-      totalINT += levelBonuses.intelligence || 0;
-      totalDEX += levelBonuses.dexterity || 0;
-      totalVIT += levelBonuses.vitality || 0;
-      totalLUK += levelBonuses.luck || 0;
-    }
-
-    // Character class bonuses
-    if (user.characterClass?.statBonuses) {
-      totalSTR += user.characterClass.statBonuses.strength || 0;
-      totalINT += user.characterClass.statBonuses.intelligence || 0;
-      totalDEX += user.characterClass.statBonuses.dexterity || 0;
-      totalVIT += user.characterClass.statBonuses.vitality || 0;
-      totalLUK += user.characterClass.statBonuses.luck || 0;
-    }
-
-    // Equipment bonuses
-    const equippedItems = await this.userItemsService.findByUserId(userId);
-    for (const userItem of equippedItems) {
-      if (userItem.isEquipped && userItem.item?.stats) {
-        totalSTR += userItem.item.stats.strength || 0;
-        totalINT += userItem.item.stats.intelligence || 0;
-        totalDEX += userItem.item.stats.dexterity || 0;
-        totalVIT += userItem.item.stats.vitality || 0;
-        totalLUK += userItem.item.stats.luck || 0;
-      }
-    }
+    // Use the authoritative getTotalStatsWithAllBonuses to ensure consistency
+    // This includes: base stats, allocated points, level bonuses, class bonuses,
+    // equipment, item sets, guild buffs, and titles
+    const totalStats =
+      await this.userStatsService.getTotalStatsWithAllBonuses(userId);
 
     return {
-      STR: totalSTR,
-      INT: totalINT,
-      DEX: totalDEX,
-      VIT: totalVIT,
-      LUK: totalLUK,
+      STR: totalStats.str,
+      INT: totalStats.int,
+      DEX: totalStats.dex,
+      VIT: totalStats.vit,
+      LUK: totalStats.luk,
     };
   }
 
@@ -758,6 +714,13 @@ export class CombatResultsService {
             );
             return false;
           }
+          // IMPORTANT: Only include EQUIPPED active skills
+          if (!ps.isEquipped) {
+            console.log(
+              `⏭️ Skipping skill ${ps.skillDefinition.name} - not equipped`,
+            );
+            return false;
+          }
           return ps.skillDefinition.skillType === 'active';
         })
         .map((ps) => ({
@@ -775,7 +738,7 @@ export class CombatResultsService {
         }));
 
       console.log(
-        `✅ [startCombatWithEnemies] User ${u.id} has ${activeSkills.length} active skills:`,
+        `✅ [startCombatWithEnemies] User ${u.id} has ${activeSkills.length} EQUIPPED active skills:`,
       );
       activeSkills.forEach((s) => {
         console.log(
@@ -1228,6 +1191,13 @@ export class CombatResultsService {
             );
             return false;
           }
+          // IMPORTANT: Only include EQUIPPED active skills
+          if (!ps.isEquipped) {
+            console.log(
+              `⏭️ Skipping skill ${ps.skillDefinition.name} - not equipped`,
+            );
+            return false;
+          }
           return ps.skillDefinition.skillType === 'active';
         })
         .map((ps) => ({
@@ -1245,7 +1215,7 @@ export class CombatResultsService {
         }));
 
       console.log(
-        `✅ User ${u.id} has ${activeSkills.length} active skills:`,
+        `✅ User ${u.id} has ${activeSkills.length} EQUIPPED active skills:`,
         activeSkills.map((s) => s.name),
       );
 
