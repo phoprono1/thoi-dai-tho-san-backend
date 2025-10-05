@@ -1,10 +1,15 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { CombatActorInput, CombatRunParams, CombatRunResult } from './types';
+import {
+  CombatActorInput,
+  CombatRunParams,
+  CombatRunResult,
+  CombatLogEntry,
+} from './types';
 import { createRng } from './prng';
 import { resolveAttack } from './resolveAttack';
 import { resolveSkill } from './resolveSkill';
 import { checkSkillConditions } from './condition-checker';
+import { resolvePetAbility } from './resolvePetAbility';
 
 export function runCombat(params: CombatRunParams): CombatRunResult {
   // By default we run until one side is defeated. If a positive maxTurns is
@@ -13,7 +18,7 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
   const maxTurns = typeof params.maxTurns === 'number' ? params.maxTurns : 0;
   const unlimited = !maxTurns || maxTurns <= 0;
   const rng = createRng(params.seed);
-  const seedUsed = (rng as any).seed;
+  const seedUsed: number | string = rng.seed;
 
   // clone inputs to avoid mutation
   const players: CombatActorInput[] = params.players.map((p, idx) => {
@@ -36,7 +41,7 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
     currentHp: e.currentHp ?? e.stats.maxHp,
   }));
 
-  const logs: any[] = [];
+  const logs: CombatLogEntry[] = [];
   let turn = 1;
 
   while (
@@ -110,6 +115,64 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
       }
     }
 
+    // ===== PET ABILITY PHASE =====
+    // Pets act after their owners but before enemies
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
+    for (const p of players) {
+      if ((p.currentHp ?? 0) <= 0) continue;
+
+      // Check if player has pet data in metadata
+      const petData = p.metadata?.pet;
+      if (!petData || !petData.abilities || petData.abilities.length === 0)
+        continue;
+
+      // Get available pet abilities (not on cooldown, sufficient mana)
+      const petStats = petData.stats || {
+        strength: 0,
+        intelligence: 0,
+        dexterity: 0,
+      };
+      const petMana = petData.currentMana ?? petData.maxMana ?? 0;
+      const availableAbilities = (petData.abilities || []).filter(
+        (ability: any) => {
+          const onCooldown = petData.abilityCooldowns?.[ability.id] > 0;
+          const hasMana = petMana >= (ability.manaCost ?? 0);
+          return !onCooldown && hasMana;
+        },
+      );
+
+      if (availableAbilities.length > 0) {
+        // Select first available ability (can be enhanced with AI later)
+        const ability = availableAbilities[0];
+        const aliveEnemies = enemies.filter((e) => (e.currentHp ?? 0) > 0);
+        const alivePlayers = players.filter((pl) => (pl.currentHp ?? 0) > 0);
+
+        // Execute pet ability
+        const res = resolvePetAbility(
+          { name: petData.name, id: petData.id },
+          ability,
+          p,
+          {
+            rng,
+            turn,
+            actionOrderStart: logs.length + 1,
+            allPlayers: alivePlayers,
+            allEnemies: aliveEnemies,
+            petStats,
+          },
+        );
+        logs.push(...res.logs);
+
+        // Set cooldown
+        if (!petData.abilityCooldowns) petData.abilityCooldowns = {};
+        petData.abilityCooldowns[ability.id] = ability.cooldown;
+
+        // Deduct mana
+        petData.currentMana = Math.max(0, petMana - (ability.manaCost ?? 0));
+      }
+    }
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
+
     // enemies act
     for (const e of enemies) {
       if ((e.currentHp ?? 0) <= 0) continue;
@@ -156,12 +219,14 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
     ? 'victory'
     : 'defeat';
 
-  return {
+  const combatResult: CombatRunResult = {
     result,
     turns: turn - 1,
     logs,
     finalPlayers: players,
     finalEnemies: enemies,
     seedUsed,
-  } as CombatRunResult;
+  };
+
+  return combatResult;
 }

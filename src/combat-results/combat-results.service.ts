@@ -20,6 +20,7 @@ import { Monster } from '../monsters/monster.entity';
 import { ItemsService } from '../items/items.service';
 import { SkillService } from '../player-skills/skill.service';
 import { QuestService } from '../quests/quest.service';
+import { PetService } from '../pets/pet.service';
 import { runCombat } from '../combat-engine/engine';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
 
@@ -45,10 +46,11 @@ export class CombatResultsService {
     private itemsService: ItemsService,
     private skillService: SkillService,
     private questService: QuestService,
+    private petService: PetService,
   ) {}
 
   /**
-   * Calculate total core attributes for a user including base stats, level bonuses, class bonuses, and equip bonuses
+   * Calculate total core attributes for a user including base stats, level bonuses, class bonuses, equip bonuses, and pet buff
    */
   private async calculateTotalCoreAttributes(userId: number): Promise<{
     STR: number;
@@ -63,12 +65,43 @@ export class CombatResultsService {
     const totalStats =
       await this.userStatsService.getTotalStatsWithAllBonuses(userId);
 
+    // Add pet stat buff (20% of active pet's stats)
+    const activePet = await this.petService.getActivePet(userId);
+    const petBuff = activePet?.getPlayerStatBuff() || {
+      strength: 0,
+      intelligence: 0,
+      dexterity: 0,
+      vitality: 0,
+      luck: 0,
+    };
+
+    console.log(`[PET BUFF DEBUG] User ${userId}:`, {
+      hasActivePet: !!activePet,
+      petName: activePet?.name,
+      petStats: activePet?.stats,
+      petBuff,
+      baseStats: {
+        str: totalStats.str,
+        int: totalStats.int,
+        dex: totalStats.dex,
+        vit: totalStats.vit,
+        luk: totalStats.luk,
+      },
+      finalStats: {
+        STR: totalStats.str + petBuff.strength,
+        INT: totalStats.int + petBuff.intelligence,
+        DEX: totalStats.dex + petBuff.dexterity,
+        VIT: totalStats.vit + petBuff.vitality,
+        LUK: totalStats.luk + petBuff.luck,
+      },
+    });
+
     return {
-      STR: totalStats.str,
-      INT: totalStats.int,
-      DEX: totalStats.dex,
-      VIT: totalStats.vit,
-      LUK: totalStats.luk,
+      STR: totalStats.str + petBuff.strength,
+      INT: totalStats.int + petBuff.intelligence,
+      DEX: totalStats.dex + petBuff.dexterity,
+      VIT: totalStats.vit + petBuff.vitality,
+      LUK: totalStats.luk + petBuff.luck,
     };
   }
 

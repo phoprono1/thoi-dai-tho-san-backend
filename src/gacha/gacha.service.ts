@@ -92,7 +92,7 @@ export class GachaService {
       // Normalize required key id stored in metadata to a number. Admin UI
       // may have stored it as a string which would cause a strict !== check
       // to fail even when the client sends the matching numeric id.
-      const rawRequired = (box.metadata as any)?.requiredKeyItemId;
+      const rawRequired = box.metadata?.requiredKeyItemId;
       const requiredKeyItemId =
         rawRequired != null ? Number(rawRequired) : null;
       if (
@@ -402,7 +402,7 @@ export class GachaService {
     const entry = this.entryRepo.create({
       ...(payload as any),
       box: { id: boxId } as any,
-    } as any);
+    });
     return this.entryRepo.save(entry as any);
   }
 

@@ -12,12 +12,15 @@ import {
   SkillDefinition,
   SkillDefinitionData,
 } from './skill-definition.entity';
+import { PlayerSkill } from './player-skill.entity';
 
 @Injectable()
 export class SkillDefinitionService {
   constructor(
     @InjectRepository(SkillDefinition)
     private skillDefinitionRepository: Repository<SkillDefinition>,
+    @InjectRepository(PlayerSkill)
+    private playerSkillRepository: Repository<PlayerSkill>,
   ) {}
 
   // Get all active skill definitions
@@ -154,12 +157,42 @@ export class SkillDefinitionService {
       );
     }
 
+    // First, remove all player skills that use this skill definition
+    await this.playerSkillRepository.delete({
+      skillDefinitionId: skill.id,
+    });
+
+    console.log(
+      `🗑️ Removed all player skills for skill definition: ${skillId}`,
+    );
+
+    // Then set the skill definition as inactive
     skill.isActive = false;
     await this.skillDefinitionRepository.save(skill);
   }
 
   // Admin: Hard delete skill definition (dangerous - removes from DB)
   async hardDeleteSkillDefinition(skillId: string): Promise<void> {
+    const skill = await this.skillDefinitionRepository.findOne({
+      where: { skillId },
+    });
+
+    if (!skill) {
+      throw new NotFoundException(
+        `Skill definition with ID '${skillId}' not found`,
+      );
+    }
+
+    // First, remove all player skills that use this skill definition
+    await this.playerSkillRepository.delete({
+      skillDefinitionId: skill.id,
+    });
+
+    console.log(
+      `🗑️ Hard deleted all player skills for skill definition: ${skillId}`,
+    );
+
+    // Then hard delete the skill definition
     const result = await this.skillDefinitionRepository.delete({ skillId });
 
     if (result.affected === 0) {

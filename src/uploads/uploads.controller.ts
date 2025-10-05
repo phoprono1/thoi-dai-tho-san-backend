@@ -19,6 +19,7 @@ import { DungeonsService } from '../dungeons/dungeons.service';
 import { ItemsService } from '../items/items.service';
 import { WorldBossService } from '../world-boss/world-boss.service';
 import { SkillDefinitionService } from '../player-skills/skill-definition.service';
+import { PetService } from '../pets/pet.service';
 import { extname, join } from 'path';
 import * as fs from 'fs';
 import { parse } from 'path';
@@ -45,6 +46,7 @@ export class UploadsController {
     private itemsService: ItemsService,
     private worldBossService: WorldBossService,
     private skillDefinitionService: SkillDefinitionService,
+    private petService: PetService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -104,7 +106,7 @@ export class UploadsController {
         return { path: rel };
       }
 
-      const sharpInstance = sharpLibAny as any;
+      const sharpInstance = sharpLibAny;
       // If uploaded file is AVIF but this sharp build lacks AVIF input support,
       // bail early with a helpful warning so the admin knows why thumbnails are missing.
       const ext = String(file && file.filename).toLowerCase();
@@ -238,7 +240,7 @@ export class UploadsController {
         return { path: rel };
       }
 
-      const sharpInstance = sharpLibAny as any;
+      const sharpInstance = sharpLibAny;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
         (sharpInstance.format &&
@@ -363,7 +365,7 @@ export class UploadsController {
         return { path: rel };
       }
 
-      const sharpInstance = sharpLibAny as any;
+      const sharpInstance = sharpLibAny;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
         (sharpInstance.format &&
@@ -512,7 +514,7 @@ export class UploadsController {
         return { path: rel };
       }
 
-      const sharpInstance = sharpLibAny as any;
+      const sharpInstance = sharpLibAny;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
         (sharpInstance.format &&
@@ -655,7 +657,7 @@ export class UploadsController {
         return { path: rel };
       }
 
-      const sharpInstance = sharpLibAny as any;
+      const sharpInstance = sharpLibAny;
       const ext = String(file && file.filename).toLowerCase();
       const avifSupported = Boolean(
         (sharpInstance.format &&
@@ -753,6 +755,303 @@ export class UploadsController {
       } catch (updateErr) {
         console.warn('Failed to update skill definition:', {
           skillId,
+          error: String(updateErr),
+        });
+      }
+      return { path: rel };
+    }
+  }
+
+  // Pet System Upload Endpoints
+
+  @UseGuards(JwtAuthGuard)
+  @Post('pets/definitions/:id')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const petsDir = join(process.cwd(), 'assets', 'pets');
+          if (!fs.existsSync(petsDir)) {
+            fs.mkdirSync(petsDir, { recursive: true });
+          }
+          cb(null, petsDir);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `pet_${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadPetImage(@Param('id') id: string, @UploadedFile() file: any) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/pets/${file.filename}`;
+    const originalPath = file.path;
+    const thumbsDir = join(process.cwd(), 'assets', 'pets', 'thumbs');
+
+    if (!fs.existsSync(thumbsDir)) {
+      fs.mkdirSync(thumbsDir, { recursive: true });
+    }
+
+    try {
+      const { name } = parse(file.filename);
+      const smallName = `${name}_64.webp`;
+      const mediumName = `${name}_256.webp`;
+
+      const sharpModule = await import('sharp');
+      const sharpLibAny: any = (sharpModule &&
+        (sharpModule.default ?? sharpModule)) as any;
+
+      if (typeof sharpLibAny !== 'function') {
+        console.warn('Sharp import did not return a callable function', {
+          file: originalPath,
+        });
+        // Add image to pet definition even if thumbnail generation fails
+        await this.petService.addImageToPetDefinition(+id, rel);
+        return { path: rel };
+      }
+
+      const sharpInstance = sharpLibAny;
+      const ext = String(file && file.filename).toLowerCase();
+      const avifSupported = Boolean(
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
+      );
+
+      if (ext.endsWith('.avif') && !avifSupported) {
+        console.warn('AVIF upload detected but AVIF input not supported', {
+          file: originalPath,
+        });
+        await this.petService.addImageToPetDefinition(+id, rel);
+        return {
+          path: rel,
+          warning: 'AVIF not supported; thumbnails not generated',
+        };
+      }
+
+      // Handle animated images (GIFs)
+      try {
+        const meta = await sharpInstance(originalPath).metadata();
+        const isAnimated = !!(
+          (meta &&
+            ((meta.pages && meta.pages > 1) ||
+              (meta.frames && meta.frames > 1))) ||
+          false
+        );
+
+        if (isAnimated) {
+          try {
+            const origExt = parse(file.filename).ext || '';
+            const smallOrigName = `${name}_64${origExt}`;
+            const mediumOrigName = `${name}_256${origExt}`;
+            fs.copyFileSync(originalPath, join(thumbsDir, smallOrigName));
+            fs.copyFileSync(originalPath, join(thumbsDir, mediumOrigName));
+            const smallRel = `/assets/pets/thumbs/${smallOrigName}`;
+            const mediumRel = `/assets/pets/thumbs/${mediumOrigName}`;
+
+            await this.petService.addImageToPetDefinition(+id, rel);
+
+            return {
+              path: rel,
+              thumbnails: { small: smallRel, medium: mediumRel },
+              warning: 'Animated image preserved without resizing',
+            };
+          } catch (copyErr) {
+            console.warn('Failed to copy animated file:', {
+              error: String(copyErr),
+            });
+          }
+        }
+      } catch (mErr) {
+        console.warn('Failed to read metadata:', {
+          error: String(mErr),
+        });
+      }
+
+      // Generate thumbnails for static images
+      await sharpInstance(originalPath)
+        .resize(64, 64, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, smallName));
+
+      await sharpInstance(originalPath)
+        .resize(256, 256, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, mediumName));
+
+      const smallRel = `/assets/pets/thumbs/${smallName}`;
+      const mediumRel = `/assets/pets/thumbs/${mediumName}`;
+
+      // Add image to pet definition
+      await this.petService.addImageToPetDefinition(+id, rel);
+
+      return {
+        path: rel,
+        thumbnails: { small: smallRel, medium: mediumRel },
+      };
+    } catch (err) {
+      console.warn('Thumbnail generation failed for pet:', {
+        error: String(err),
+        file: String(file?.filename),
+      });
+      // Still add image to pet definition
+      try {
+        await this.petService.addImageToPetDefinition(+id, rel);
+      } catch (updateErr) {
+        console.warn('Failed to update pet definition:', {
+          id,
+          error: String(updateErr),
+        });
+      }
+      return { path: rel };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('pets/banners/:id')
+  @UseInterceptors(
+    FileInterceptor('banner', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const bannersDir = join(process.cwd(), 'assets', 'pets', 'banners');
+          if (!fs.existsSync(bannersDir)) {
+            fs.mkdirSync(bannersDir, { recursive: true });
+          }
+          cb(null, bannersDir);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `banner_${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadPetBannerImage(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/pets/banners/${file.filename}`;
+
+    try {
+      // Update banner image in database
+      await this.petService.updateBannerImage(+id, rel);
+      return { path: rel };
+    } catch (err) {
+      console.warn('Failed to update pet banner:', {
+        id,
+        error: String(err),
+      });
+      return { path: rel };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('pets/equipment/:id')
+  @UseInterceptors(
+    FileInterceptor('icon', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const equipmentDir = join(
+            process.cwd(),
+            'assets',
+            'pets',
+            'equipment',
+          );
+          if (!fs.existsSync(equipmentDir)) {
+            fs.mkdirSync(equipmentDir, { recursive: true });
+          }
+          cb(null, equipmentDir);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `equipment_${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadPetEquipmentIcon(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/pets/equipment/${file.filename}`;
+    const originalPath = file.path;
+    const thumbsDir = join(
+      process.cwd(),
+      'assets',
+      'pets',
+      'equipment',
+      'thumbs',
+    );
+
+    if (!fs.existsSync(thumbsDir)) {
+      fs.mkdirSync(thumbsDir, { recursive: true });
+    }
+
+    try {
+      const { name } = parse(file.filename);
+      const iconName = `${name}_64.webp`;
+
+      const sharpModule = await import('sharp');
+      const sharpLibAny: any = (sharpModule &&
+        (sharpModule.default ?? sharpModule)) as any;
+
+      if (typeof sharpLibAny !== 'function') {
+        console.warn('Sharp import did not return a callable function');
+        await this.petService.updateEquipmentIcon(id, rel);
+        return { path: rel };
+      }
+
+      const sharpInstance = sharpLibAny;
+
+      // Generate icon-sized thumbnail (64x64)
+      await sharpInstance(originalPath)
+        .resize(64, 64, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toFile(join(thumbsDir, iconName));
+
+      const iconRel = `/assets/pets/equipment/thumbs/${iconName}`;
+
+      // Update equipment icon in database
+      await this.petService.updateEquipmentIcon(id, iconRel);
+
+      return {
+        path: rel,
+        icon: iconRel,
+      };
+    } catch (err) {
+      console.warn('Icon generation failed for pet equipment:', {
+        error: String(err),
+        file: String(file?.filename),
+      });
+      try {
+        await this.petService.updateEquipmentIcon(id, rel);
+      } catch (updateErr) {
+        console.warn('Failed to update pet equipment:', {
+          id,
           error: String(updateErr),
         });
       }

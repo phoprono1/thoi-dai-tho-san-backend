@@ -83,7 +83,7 @@ export class UpdateWorldBossTable1758787332309 implements MigrationInterface {
   public async down(queryRunner: QueryRunner): Promise<void> {
     // Remove foreign key
     const table = await queryRunner.getTable('world_boss');
-    const foreignKey = table!.foreignKeys.find(
+    const foreignKey = table.foreignKeys.find(
       (fk) => fk.columnNames.indexOf('scheduleId') !== -1,
     );
     if (foreignKey) {

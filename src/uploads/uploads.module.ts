@@ -4,6 +4,7 @@ import { DungeonsModule } from '../dungeons/dungeons.module';
 import { ItemsModule } from '../items/items.module';
 import { WorldBossModule } from '../world-boss/world-boss.module';
 import { SkillDefinitionModule } from '../player-skills/skill-definition.module';
+import { PetsModule } from '../pets/pets.module';
 import { UploadsController } from './uploads.controller';
 
 @Module({
@@ -13,6 +14,7 @@ import { UploadsController } from './uploads.controller';
     ItemsModule,
     WorldBossModule,
     SkillDefinitionModule,
+    PetsModule,
   ],
   controllers: [UploadsController],
 })

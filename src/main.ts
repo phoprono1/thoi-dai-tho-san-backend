@@ -122,7 +122,7 @@ async function bootstrap() {
     // doesn't align with the runtime working directory in different
     // deployment setups.
     const root = path.join(process.cwd(), 'assets');
-    const subdirs = ['monsters', 'dungeons', 'items', 'world-boss'];
+    const subdirs = ['monsters', 'dungeons', 'items', 'world-boss', 'pets'];
     if (!fs.existsSync(root)) {
       fs.mkdirSync(root, { recursive: true });
       // create a simple README so the folder is self-describing if someone
@@ -130,7 +130,7 @@ async function bootstrap() {
       try {
         fs.writeFileSync(
           path.join(root, 'README.md'),
-          '# Assets\n\nPlace monster, dungeon, item, and world boss images in the corresponding subfolders: monsters/, dungeons/, items/, world-boss/\n',
+          '# Assets\n\nPlace monster, dungeon, item, world boss, and pet images in the corresponding subfolders: monsters/, dungeons/, items/, world-boss/, pets/\n',
         );
       } catch (e) {
         // ignore write failures
@@ -142,6 +142,20 @@ async function bootstrap() {
       // ensure thumbs subfolder exists for generated thumbnails
       const thumbs = path.join(p, 'thumbs');
       if (!fs.existsSync(thumbs)) fs.mkdirSync(thumbs, { recursive: true });
+
+      // Special handling for pets folder - create additional subfolders
+      if (d === 'pets') {
+        const bannersDir = path.join(p, 'banners');
+        const equipmentDir = path.join(p, 'equipment');
+        const equipmentThumbsDir = path.join(equipmentDir, 'thumbs');
+
+        if (!fs.existsSync(bannersDir))
+          fs.mkdirSync(bannersDir, { recursive: true });
+        if (!fs.existsSync(equipmentDir))
+          fs.mkdirSync(equipmentDir, { recursive: true });
+        if (!fs.existsSync(equipmentThumbsDir))
+          fs.mkdirSync(equipmentThumbsDir, { recursive: true });
+      }
     }
   } catch (err) {
     // Do not crash the app if we cannot create folders; log and continue.
