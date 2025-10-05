@@ -19,6 +19,7 @@ import { ItemsModule } from '../items/items.module';
 import { SkillModule } from '../player-skills/skill.module';
 import { QuestModule } from '../quests/quest.module';
 import { PetsModule } from '../pets/pets.module';
+import { PetAbility } from '../pets/entities/pet-ability.entity';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PetsModule } from '../pets/pets.module';
       Dungeon,
       UserStat,
       Monster,
+      PetAbility,
     ]),
     UsersModule,
     DungeonsModule,

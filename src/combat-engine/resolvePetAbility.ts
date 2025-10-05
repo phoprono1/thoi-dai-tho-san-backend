@@ -1,5 +1,6 @@
 import { CombatActorInput } from './types';
 import { createRng } from './prng';
+import { deriveCombatStats } from './stat-converter';
 
 type PRNG = ReturnType<typeof createRng>;
 
@@ -125,6 +126,7 @@ export function resolvePetAbility(
         turn,
         actionOrder,
         logs,
+        allEnemies,
       );
       break;
     case 'heal':
@@ -156,12 +158,26 @@ function executeAttackAbility(
   turn: number,
   actionOrder: number,
   logs: any[],
+  allEnemies: CombatActorInput[],
 ): void {
   const effects = ability.effects;
   const damageType = effects.damageType || 'physical';
   const baseMultiplier = effects.damageMultiplier || 1.0;
 
-  // Calculate scaling from pet stats
+  // Convert pet core stats to combat stats
+  let petAttack = 0;
+  if (petStats) {
+    const petCombatStats = deriveCombatStats({
+      STR: petStats.strength,
+      INT: petStats.intelligence,
+      DEX: petStats.dexterity,
+      VIT: 0,
+      LUK: 0,
+    });
+    petAttack = petCombatStats.attack;
+  }
+
+  // Calculate scaling from pet stats (additional bonus)
   let scalingBonus = 0;
   if (petStats && effects.scaling) {
     if (effects.scaling.strength) {
@@ -176,9 +192,8 @@ function executeAttackAbility(
   }
 
   targets.forEach((target) => {
-    // Base damage from owner's attack + pet scaling
-    const ownerAttack = owner.stats.attack || 10;
-    const baseDamage = ownerAttack * baseMultiplier + scalingBonus;
+    // Base damage from pet's converted attack stat + multiplier + scaling bonus
+    const baseDamage = petAttack * baseMultiplier + scalingBonus;
 
     // Apply target defense (simplified)
     const targetDefense = target.stats.defense || 0;
@@ -204,21 +219,24 @@ function executeAttackAbility(
     logs.push({
       turn,
       actionOrder,
-      actorType: 'pet',
-      actorId: pet.id,
-      actorName: pet.name,
-      targetType: target.isPlayer ? 'player' : 'enemy',
-      targetId: target.id,
-      targetName: target.name,
       action: 'pet_ability',
-      abilityName: ability.name,
-      abilityType: ability.type,
-      damageType,
-      damage: finalDamage,
-      targetHpBefore: oldHp,
-      targetHpAfter: target.currentHp,
-      message: `${pet.name} used ${ability.name}! Dealt ${finalDamage} ${damageType} damage to ${target.name}`,
-      icon: ability.icon,
+      userId: owner.id,
+      details: {
+        actor: 'pet',
+        actorName: pet.name,
+        petId: pet.id,
+        targetName: target.name,
+        targetIndex: allEnemies.findIndex((e) => e.id === target.id),
+        damage: finalDamage,
+        damageType,
+        isCritical: false,
+        isMiss: false,
+        hpBefore: oldHp,
+        hpAfter: target.currentHp,
+        description: `${pet.name} sử dụng ${ability.name} gây ${finalDamage} sát thương ${damageType} lên ${target.name}`,
+        abilityIcon: ability.icon,
+        effects: [],
+      },
     });
 
     // Apply additional effects (poison, burn, etc.)

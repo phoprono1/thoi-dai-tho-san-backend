@@ -160,8 +160,13 @@ export class AdminPetController {
   // Banner Management
   @Get('banners')
   async getAllBanners() {
-    // TODO: Get all banners including inactive ones
-    return this.petGachaService.getActiveBanners();
+    // Admin should see ALL banners (including inactive and scheduled)
+    return this.petBannerRepository.find({
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'DESC',
+      },
+    });
   }
 
   @Get('banners/:id')

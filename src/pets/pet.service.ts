@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Injectable,
   NotFoundException,
@@ -196,10 +200,50 @@ export class PetService {
               }
             }
 
+            // Fetch unlocked abilities with full details
+            const abilities: any[] = [];
+            if (pet.unlockedAbilities && pet.unlockedAbilities.length > 0) {
+              try {
+                // Convert string IDs to numbers
+                const abilityIds = pet.unlockedAbilities
+                  .map((id) => parseInt(id, 10))
+                  .filter((id) => !isNaN(id));
+
+                if (abilityIds.length > 0) {
+                  const abilityEntities = await this.petAbilityRepository.find({
+                    where: { id: In(abilityIds) },
+                  });
+
+                  for (const ability of abilityEntities) {
+                    abilities.push({
+                      id: ability.id,
+                      name: ability.name,
+                      type: ability.type,
+                      description: ability.description,
+                      effects: ability.effects,
+                      cooldown: ability.cooldown,
+                      manaCost: ability.manaCost,
+                      targetType: ability.targetType,
+                      icon: ability.icon,
+                      rarity: ability.rarity,
+                      currentCooldown: pet.abilityCooldowns?.[ability.id] || 0,
+                    });
+                  }
+                }
+              } catch (abilityError) {
+                console.error(
+                  `Error fetching abilities for pet ${pet.id}:`,
+                  abilityError,
+                );
+                // Continue without abilities
+              }
+            }
+
             // Return plain object with all needed properties
             return {
               ...pet,
               equipment,
+              abilities,
               imageUrl: pet.getCurrentSkinUrl(),
               name: pet.petDefinition?.name || 'Unknown Pet',
               petId: pet.petDefinition?.petId || '',
@@ -443,22 +487,22 @@ export class PetService {
 
     // Check required pets for sacrifice
     const userPets = await this.getUserPets(userId);
-    
+
     // Sort requirements by rarity (descending) to check higher rarity requirements first
     const sortedRequirements = [...evolution.requiredPets].sort(
       (a, b) => b.rarity - a.rarity,
     );
-    
+
     const allocatedPetIds = new Set<number>();
-    
+
     for (const reqPet of sortedRequirements) {
       const availablePets = userPets.filter((pet) => {
         // Skip if already allocated
         if (allocatedPetIds.has(pet.id)) return false;
-        
+
         // Skip the pet being evolved
         if (pet.id === userPet.id) return false;
-        
+
         // Check rarity requirement
         return pet.petDefinition.rarity >= reqPet.rarity;
       });

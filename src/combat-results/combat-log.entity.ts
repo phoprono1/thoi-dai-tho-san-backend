@@ -42,16 +42,22 @@ export class CombatLog {
 
   @Column('json')
   details: {
-    actor: 'player' | 'enemy';
+    actor: 'player' | 'enemy' | 'pet';
     actorName: string;
+    petId?: number; // ID of the pet (if actor is 'pet')
     targetName: string;
     targetIndex?: number; // For multiple enemies with same name
     damage?: number;
+    damageType?: string; // Physical, magical, or true damage
     isCritical?: boolean;
     isMiss?: boolean;
     hpBefore: number;
     hpAfter: number;
+    manaBefore?: number; // Mana before action
+    manaAfter?: number; // Mana after action
+    manaCost?: number; // Mana consumed by the action
     description: string;
+    abilityIcon?: string; // Icon for pet abilities
     effects?: string[];
   };
 

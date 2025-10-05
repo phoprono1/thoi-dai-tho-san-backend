@@ -6,7 +6,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { CombatResult, CombatResultType } from './combat-result.entity';
 import { CombatLog } from './combat-log.entity';
 import { User } from '../users/user.entity';
@@ -21,6 +21,7 @@ import { ItemsService } from '../items/items.service';
 import { SkillService } from '../player-skills/skill.service';
 import { QuestService } from '../quests/quest.service';
 import { PetService } from '../pets/pet.service';
+import { PetAbility } from '../pets/entities/pet-ability.entity';
 import { runCombat } from '../combat-engine/engine';
 import { deriveCombatStats } from '../combat-engine/stat-converter';
 
@@ -39,6 +40,8 @@ export class CombatResultsService {
     private userStatsRepository: Repository<UserStat>,
     @InjectRepository(Monster)
     private monstersRepository: Repository<Monster>,
+    @InjectRepository(PetAbility)
+    private petAbilityRepository: Repository<PetAbility>,
     private userItemsService: UserItemsService,
     private levelsService: LevelsService,
     private userStaminaService: UserStaminaService,
@@ -379,11 +382,50 @@ export class CombatResultsService {
         skill: 'skill',
         item: 'item',
         escape: 'escape',
+        pet_ability: 'skill', // Treat pet abilities as skills for DB enum compatibility
       };
       return map[t] ?? 'attack';
     };
 
     const normalizedLogs = (combatResult.logs || []).map((l: any) => {
+      // Handle pet ability logs - they already have userId set to the owner's ID
+      // and don't use actorIsPlayer flag
+      if (l.action === 'pet_ability') {
+        // Pet ability logs already have userId set correctly by resolvePetAbility
+        // Just use the userId from the log directly
+        const userId = l.userId || (users[0]?.id ?? null);
+        
+        const effects: string[] = [];
+        // Pet abilities may have effects in the future
+        if (l.details?.effects) {
+          effects.push(...l.details.effects);
+        }
+
+        return {
+          turn: l.turn,
+          actionOrder: l.actionOrder,
+          action: normalizeAction(l.action),
+          userId,
+          details: {
+            actor: 'pet', // Preserve pet actor type
+            actorName: l.details?.actorName || 'Pet',
+            petId: l.details?.petId,
+            targetName: l.details?.targetName,
+            targetIndex: l.details?.targetIndex,
+            damage: l.details?.damage,
+            damageType: l.details?.damageType,
+            isCritical: l.details?.isCritical || false,
+            isMiss: l.details?.isMiss || false,
+            hpBefore: l.details?.hpBefore,
+            hpAfter: l.details?.hpAfter,
+            description: l.details?.description || '',
+            abilityIcon: l.details?.abilityIcon,
+            effects,
+          },
+        };
+      }
+
+      // Original logic for player/enemy actions
       // Determine which user the DB's userId field should reference:
       // - If actor is a player, it's the actor's userId
       // - Otherwise, for enemy actions we map to the target player userId
@@ -929,11 +971,48 @@ export class CombatResultsService {
         skill: 'skill',
         item: 'item',
         escape: 'escape',
+        pet_ability: 'skill', // Treat pet abilities as skills for DB enum compatibility
       };
       return map[t] ?? 'attack';
     };
 
     const normalizedLogs = (logs || []).map((l: any) => {
+      // Handle pet ability logs - they already have userId set to the owner's ID
+      if (l.action === 'pet_ability') {
+        const userId = l.userId || (users[0]?.id ?? null);
+        
+        const effects: string[] = [];
+        if (l.details?.effects) {
+          effects.push(...l.details.effects);
+        }
+
+        return {
+          turn: l.turn,
+          actionOrder: l.actionOrder,
+          action: normalizeAction(l.action),
+          userId,
+          details: {
+            actor: 'pet', // Preserve pet actor type
+            actorName: l.details?.actorName || 'Pet',
+            petId: l.details?.petId,
+            targetName: l.details?.targetName,
+            targetIndex: l.details?.targetIndex,
+            damage: l.details?.damage,
+            damageType: l.details?.damageType,
+            isCritical: l.details?.isCritical || false,
+            isMiss: l.details?.isMiss || false,
+            hpBefore: l.details?.hpBefore,
+            hpAfter: l.details?.hpAfter,
+            manaBefore: l.details?.manaBefore,
+            manaAfter: l.details?.manaAfter,
+            description: l.details?.description || '',
+            abilityIcon: l.details?.abilityIcon,
+            effects,
+          },
+        };
+      }
+
+      // Original logic for player/enemy actions
       const userId = l.actorIsPlayer
         ? l.actorId
         : l.targetIsPlayer
@@ -1260,6 +1339,87 @@ export class CombatResultsService {
         `🔍 [PROCESS TEAM] User ${u.id} (${u.username}) - DB currentMana: ${u.stats.currentMana}, maxMana: ${derivedStats.maxMana}, using: ${currentMana}`,
       );
 
+      // Get active pet and its abilities
+      const activePet = await this.petService.getActivePet(u.id);
+      let petMetadata = null;
+
+      if (activePet) {
+        console.log(`🐾 [PROCESS TEAM] User ${u.id} has active pet:`, {
+          id: activePet.id,
+          name: activePet.petDefinition?.name,
+          level: activePet.level,
+          stats: activePet.stats,
+          unlockedAbilities: activePet.unlockedAbilities,
+        });
+
+        // Fetch pet abilities
+        const petAbilities: any[] = [];
+        if (
+          activePet.unlockedAbilities &&
+          activePet.unlockedAbilities.length > 0
+        ) {
+          const abilityIds = activePet.unlockedAbilities
+            .map((id) => parseInt(id, 10))
+            .filter((id) => !isNaN(id));
+
+          if (abilityIds.length > 0) {
+            const abilityEntities = await this.petAbilityRepository.find({
+              where: { id: In(abilityIds) },
+            });
+
+            for (const ability of abilityEntities) {
+              petAbilities.push({
+                id: ability.id,
+                name: ability.name,
+                type: ability.type,
+                description: ability.description,
+                effects: ability.effects,
+                cooldown: ability.cooldown,
+                manaCost: ability.manaCost,
+                targetType: ability.targetType,
+                icon: ability.icon,
+                rarity: ability.rarity,
+              });
+            }
+
+            console.log(
+              `   🎯 Loaded ${petAbilities.length} abilities for pet "${activePet.petDefinition?.name}":`,
+              petAbilities.map((a) => a.name),
+            );
+          }
+        }
+
+        // Calculate pet mana (simple system: max mana = 100, starts at 100)
+        const petMaxMana = 100;
+        const petCurrentMana = petMaxMana; // Pets start with full mana each combat
+
+        petMetadata = {
+          id: activePet.id,
+          name: activePet.petDefinition?.name || 'Unknown Pet',
+          level: activePet.level,
+          stats: activePet.stats || {
+            strength: 0,
+            intelligence: 0,
+            dexterity: 0,
+            vitality: 0,
+            luck: 0,
+          },
+          abilities: petAbilities,
+          abilityCooldowns: activePet.abilityCooldowns || {},
+          maxMana: petMaxMana,
+          currentMana: petCurrentMana,
+        };
+
+        console.log(`   ✅ Pet metadata prepared:`, {
+          name: petMetadata.name,
+          abilitiesCount: petMetadata.abilities.length,
+          maxMana: petMetadata.maxMana,
+          currentMana: petMetadata.currentMana,
+        });
+      } else {
+        console.log(`   ❌ User ${u.id} has no active pet`);
+      }
+
       return {
         id: u.id,
         name: u.username,
@@ -1268,6 +1428,7 @@ export class CombatResultsService {
         currentHp: u.stats.currentHp,
         skills: activeSkills,
         skillCooldowns: {}, // Initialize empty cooldowns
+        metadata: petMetadata ? { pet: petMetadata } : undefined, // ← Add pet metadata here!
       };
     });
 

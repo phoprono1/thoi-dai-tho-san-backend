@@ -118,13 +118,37 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
     // ===== PET ABILITY PHASE =====
     // Pets act after their owners but before enemies
     /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
+    console.log(
+      `\n🐾 [PET ABILITY PHASE] Turn ${turn} - Checking ${players.length} players for pet abilities`,
+    );
     for (const p of players) {
-      if ((p.currentHp ?? 0) <= 0) continue;
+      if ((p.currentHp ?? 0) <= 0) {
+        console.log(`   ⏭️ Player ${p.name} is dead, skipping pet check`);
+        continue;
+      }
 
       // Check if player has pet data in metadata
       const petData = p.metadata?.pet;
-      if (!petData || !petData.abilities || petData.abilities.length === 0)
+      console.log(`   🔍 Player ${p.name} metadata.pet:`, {
+        hasPet: !!petData,
+        petName: petData?.name,
+        hasAbilities: !!(petData?.abilities && petData.abilities.length > 0),
+        abilitiesCount: petData?.abilities?.length || 0,
+        abilities: petData?.abilities?.map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          type: a.type,
+          manaCost: a.manaCost,
+        })),
+        petMana: petData?.currentMana ?? petData?.maxMana ?? 0,
+        maxMana: petData?.maxMana,
+        cooldowns: petData?.abilityCooldowns,
+      });
+
+      if (!petData || !petData.abilities || petData.abilities.length === 0) {
+        console.log(`   ❌ ${p.name}: No pet or no abilities available`);
         continue;
+      }
 
       // Get available pet abilities (not on cooldown, sufficient mana)
       const petStats = petData.stats || {
@@ -137,13 +161,23 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
         (ability: any) => {
           const onCooldown = petData.abilityCooldowns?.[ability.id] > 0;
           const hasMana = petMana >= (ability.manaCost ?? 0);
+          console.log(
+            `      🎯 Ability "${ability.name}" (${ability.type}): cooldown=${onCooldown}, hasMana=${hasMana} (need ${ability.manaCost}, have ${petMana})`,
+          );
           return !onCooldown && hasMana;
         },
+      );
+
+      console.log(
+        `   📊 ${p.name}'s pet "${petData.name}": ${availableAbilities.length}/${petData.abilities.length} abilities available`,
       );
 
       if (availableAbilities.length > 0) {
         // Select first available ability (can be enhanced with AI later)
         const ability = availableAbilities[0];
+        console.log(
+          `   ✅ Using ability "${ability.name}" (${ability.type}) - Cost: ${ability.manaCost} mana`,
+        );
         const aliveEnemies = enemies.filter((e) => (e.currentHp ?? 0) > 0);
         const alivePlayers = players.filter((pl) => (pl.currentHp ?? 0) > 0);
 
@@ -161,14 +195,49 @@ export function runCombat(params: CombatRunParams): CombatRunResult {
             petStats,
           },
         );
+        console.log(
+          `   📝 Pet ability generated ${res.logs.length} log entries`,
+        );
+
+        // Log details of the ability execution
+        if (res.logs.length > 0) {
+          res.logs.forEach((log: any, idx: number) => {
+            const details = log.details || {};
+            if (details.damage) {
+              console.log(
+                `      💥 [${idx + 1}] ${details.description || 'Attack'}: ${details.damage} damage to ${details.targetName} (${details.hpBefore} → ${details.hpAfter})`,
+              );
+            } else if (details.healing) {
+              console.log(
+                `      💚 [${idx + 1}] ${details.description || 'Heal'}: ${details.healing} healing to ${details.targetName}`,
+              );
+            } else if (details.buffApplied || details.debuffApplied) {
+              console.log(
+                `      ✨ [${idx + 1}] ${details.description || 'Buff/Debuff applied'}`,
+              );
+            } else {
+              console.log(
+                `      📄 [${idx + 1}] ${details.description || 'Effect applied'}`,
+              );
+            }
+          });
+        }
+
         logs.push(...res.logs);
 
         // Set cooldown
         if (!petData.abilityCooldowns) petData.abilityCooldowns = {};
         petData.abilityCooldowns[ability.id] = ability.cooldown;
+        console.log(
+          `   ⏱️ Set cooldown for ability ${ability.id}: ${ability.cooldown} turns`,
+        );
 
         // Deduct mana
-        petData.currentMana = Math.max(0, petMana - (ability.manaCost ?? 0));
+        const newMana = Math.max(0, petMana - (ability.manaCost ?? 0));
+        petData.currentMana = newMana;
+        console.log(
+          `   🔋 Pet mana: ${petMana} → ${newMana} (-${ability.manaCost})`,
+        );
       }
     }
     /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument */
