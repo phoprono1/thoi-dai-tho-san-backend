@@ -209,14 +209,30 @@ export class SkillService {
       skillEntity.classRestrictions.length > 0
     ) {
       const user = await this.userStatsService.findByUserId(userId);
-      const userClass = user?.user?.characterClass?.name;
+      const characterClass = user?.user?.characterClass;
 
-      if (
-        !userClass ||
-        !skillEntity.classRestrictions.includes(userClass.toLowerCase())
-      ) {
+      if (!characterClass) {
         throw new BadRequestException(
-          `This skill is restricted to classes: ${skillEntity.classRestrictions.join(', ')}. Your class: ${userClass || 'none'}`,
+          `This skill is restricted to classes: ${skillEntity.classRestrictions.join(', ')}. You have no class selected.`,
+        );
+      }
+
+      // Check both type and name (lowercase) to handle different formats
+      const userClassType = characterClass.type?.toLowerCase();
+      const userClassName = characterClass.name?.toLowerCase();
+
+      // Normalize class restrictions to lowercase for comparison
+      const normalizedRestrictions = skillEntity.classRestrictions.map((c) =>
+        c.toLowerCase(),
+      );
+
+      const hasAccess =
+        normalizedRestrictions.includes(userClassType) ||
+        normalizedRestrictions.includes(userClassName);
+
+      if (!hasAccess) {
+        throw new BadRequestException(
+          `This skill is restricted to classes: ${skillEntity.classRestrictions.join(', ')}. Your class: ${characterClass.name} (${characterClass.type})`,
         );
       }
     }

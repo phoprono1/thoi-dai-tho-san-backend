@@ -53,6 +53,10 @@ export interface SkillDefinitionData {
   damageFormula?: string; // e.g., "INT * 2 + level * 10"
   healingFormula?: string;
   image?: string; // Path to skill icon image
+  // Prerequisites and restrictions
+  prerequisites?: string[]; // Array of skillIds that must be unlocked first
+  requiredSkillLevels?: Record<string, number>; // { "power_strike": 3 }
+  classRestrictions?: string[]; // Array of class names, empty = all classes
 }
 
 @Entity('skill_definitions')
@@ -188,7 +192,10 @@ export class SkillDefinition {
       damageType: this.damageType,
       damageFormula: this.damageFormula,
       healingFormula: this.healingFormula,
-      image: this.image, // ✅ ADD THIS
+      image: this.image,
+      prerequisites: this.prerequisites,
+      requiredSkillLevels: this.requiredSkillLevels,
+      classRestrictions: this.classRestrictions,
     };
   }
 }

@@ -63,9 +63,14 @@ export function resolveAttack(
       Math.floor((defender.stats.defense || 0) * (1 - armorPen / 100)),
     );
 
+    // Percentage-based defense reduction instead of linear subtraction
+    // This prevents invincibility at high defense while still making defense meaningful
+    // Formula: damage = attack * (1 - def/(def + 100))
+    // Examples: def=50 → 33% reduction, def=100 → 50%, def=200 → 67%
+    const defenseReduction = effectiveDef / (effectiveDef + 100);
     const rawBase = Math.max(
       1,
-      Math.floor((attacker.stats.attack || 1) - effectiveDef),
+      Math.floor((attacker.stats.attack || 1) * (1 - defenseReduction)),
     );
     const variance = Math.max(1, Math.floor(rawBase * 0.1));
     const randAdd = Math.floor(rng.next() * (variance + 1));
@@ -102,10 +107,10 @@ export function resolveAttack(
       } as CombatLogEntry);
     }
 
+    // Only show mechanics that actually triggered
     const parts: string[] = [];
     if (crit) parts.push('bạo kích');
-    if ((attacker.stats.comboRate || 0) > 0) parts.push('liên kích?');
-    if (lifesteal > 0) parts.push('hút máu');
+    // Note: combo will be added later when we know if it actually triggered
     const descFlags = parts.length > 0 ? ` (${parts.join(', ')})` : '';
     logs.push({
       turn: options.turn,
@@ -171,10 +176,24 @@ export function resolveAttack(
   ) {
     comboIndex++;
     const dmg = doOne();
-    logs[logs.length - 1].flags = {
-      ...(logs[logs.length - 1].flags || {}),
-      comboIndex,
-    };
+
+    // Update the last log entry to indicate it's a combo hit
+    const lastLog = logs[logs.length - 1];
+    if (lastLog && lastLog.type === 'attack') {
+      lastLog.flags = {
+        ...(lastLog.flags || {}),
+        comboIndex,
+      };
+
+      // Add combo indicator to description
+      const comboText = ` [Liên kích x${comboIndex + 1}]`;
+      if (!lastLog.description.includes('[Liên kích')) {
+        lastLog.description = lastLog.description.replace(
+          ' gây ',
+          `${comboText} gây `,
+        );
+      }
+    }
   }
 
   return { logs, damageTotal, actionOrderEnd: actionOrder };

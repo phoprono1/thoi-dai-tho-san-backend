@@ -93,6 +93,9 @@ export class SkillDefinitionService {
       damageType: data.damageType,
       damageFormula: data.damageFormula,
       healingFormula: data.healingFormula,
+      prerequisites: data.prerequisites || [],
+      requiredSkillLevels: data.requiredSkillLevels || {},
+      classRestrictions: data.classRestrictions || [],
     });
 
     return this.skillDefinitionRepository.save(skill);
@@ -141,6 +144,14 @@ export class SkillDefinitionService {
       skill.damageFormula = data.damageFormula;
     if (data.healingFormula !== undefined)
       skill.healingFormula = data.healingFormula;
+
+    // Update prerequisites and restrictions
+    if (data.prerequisites !== undefined)
+      skill.prerequisites = data.prerequisites;
+    if (data.requiredSkillLevels !== undefined)
+      skill.requiredSkillLevels = data.requiredSkillLevels;
+    if (data.classRestrictions !== undefined)
+      skill.classRestrictions = data.classRestrictions;
 
     return this.skillDefinitionRepository.save(skill);
   }

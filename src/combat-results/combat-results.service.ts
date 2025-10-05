@@ -394,7 +394,7 @@ export class CombatResultsService {
         // Pet ability logs already have userId set correctly by resolvePetAbility
         // Just use the userId from the log directly
         const userId = l.userId || (users[0]?.id ?? null);
-        
+
         const effects: string[] = [];
         // Pet abilities may have effects in the future
         if (l.details?.effects) {
@@ -980,7 +980,7 @@ export class CombatResultsService {
       // Handle pet ability logs - they already have userId set to the owner's ID
       if (l.action === 'pet_ability') {
         const userId = l.userId || (users[0]?.id ?? null);
-        
+
         const effects: string[] = [];
         if (l.details?.effects) {
           effects.push(...l.details.effects);

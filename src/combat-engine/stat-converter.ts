@@ -3,8 +3,8 @@ import { CombatStats } from './types';
 export const CONFIG = {
   p: 0.94,
   atk_from_STR: 0.45,
-  atk_from_INT: 0.6,
-  atk_from_DEX: 0.18,
+  atk_from_INT: 0.5, // Reduced from 0.6 - mages should rely on skills
+  atk_from_DEX: 0.25, // Increased from 0.18 - encourage hybrid builds
   hp_from_VIT: 12,
   def_from_VIT: 0.5,
   mana_from_INT: 10, // Mana scaling: baseMana + 10 * effective(INT)
@@ -12,9 +12,10 @@ export const CONFIG = {
   critDamage_from_LUK: 0.15,
   dodge_from_DEX: 0.25,
   accuracy_from_DEX: 0.35,
-  armorPen_from_STR: 0.02,
-  lifesteal_from_STR: 0.03,
-  combo_from_DEX: 0.08,
+  armorPen_from_STR: 0.05, // Increased from 0.02 - more meaningful
+  lifesteal_from_LUK: 0.08, // Moved from STR - lifesteal scales with luck
+  combo_from_DEX: 0.05, // Reduced from 0.08 - was triggering too often
+  counter_from_VIT: 0.08, // New - counter scales with vitality
   maxCritRate: 75,
   dodgeCap: 70,
   baseMana: 50, // Base mana for all characters
@@ -84,12 +85,12 @@ export function deriveCombatStats(core: {
   const critDamage = 150 + (CONFIG.critDamage_from_LUK * l || 0);
 
   const dodgeRate = Math.min(CONFIG.dodgeCap, CONFIG.dodge_from_DEX * d || 0);
-  const accuracy = CONFIG.accuracy_from_DEX * d || 0;
+  const accuracy = 85 + (CONFIG.accuracy_from_DEX * d || 0); // Base 85% + DEX bonus
 
   const armorPen = CONFIG.armorPen_from_STR * s || 0;
-  const lifesteal = CONFIG.lifesteal_from_STR * s || 0;
+  const lifesteal = CONFIG.lifesteal_from_LUK * l || 0; // Lifesteal scales with luck
   const comboRate = CONFIG.combo_from_DEX * d || 0;
-  const counterRate = 0;
+  const counterRate = CONFIG.counter_from_VIT * v || 0; // Counter scales with vitality
 
   // Mana formula: baseMana + mana_from_INT * effective(INT)
   // Same pattern as HP: baseMaxHp + hp_from_VIT * effective(VIT)
