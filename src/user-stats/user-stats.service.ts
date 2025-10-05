@@ -433,6 +433,58 @@ export class UserStatsService {
       );
     }
   }
+  /**
+   * Get detailed combat stats derived from core stats
+   * Shows actual attack, defense, HP, mana, crit rate, etc.
+   */
+  async getDetailedCombatStats(userId: number) {
+    const totalStats = await this.getTotalStatsWithAllBonuses(userId);
+    const userStats = await this.findByUserId(userId);
+    if (!userStats) {
+      throw new Error(`User ${userId} not found`);
+    }
+
+    const { deriveCombatStats } = await import(
+      '../combat-engine/stat-converter'
+    );
+
+    // Base values - these are defaults, actual stats come from deriveCombatStats
+    const combatStats = deriveCombatStats({
+      baseAttack: 10,
+      baseMaxHp: 100,
+      baseDefense: 5,
+      baseMana: 50,
+      STR: totalStats.str,
+      INT: totalStats.int,
+      DEX: totalStats.dex,
+      VIT: totalStats.vit,
+      LUK: totalStats.luk,
+      strengthPoints: userStats.strengthPoints || 0,
+      intelligencePoints: userStats.intelligencePoints || 0,
+      dexterityPoints: userStats.dexterityPoints || 0,
+      vitalityPoints: userStats.vitalityPoints || 0,
+      luckPoints: userStats.luckPoints || 0,
+    });
+
+    return {
+      coreStats: totalStats,
+      combatStats: {
+        maxHp: combatStats.maxHp,
+        maxMana: combatStats.maxMana,
+        attack: combatStats.attack,
+        defense: combatStats.defense,
+        critRate: combatStats.critRate,
+        critDamage: combatStats.critDamage,
+        dodgeRate: combatStats.dodgeRate,
+        accuracy: combatStats.accuracy,
+        lifesteal: combatStats.lifesteal,
+        armorPen: combatStats.armorPen,
+        comboRate: combatStats.comboRate,
+        counterRate: combatStats.counterRate,
+      },
+    };
+  }
+
   async getTotalStatsWithAllBonuses(userId: number): Promise<{
     str: number;
     int: number;

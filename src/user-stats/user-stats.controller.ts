@@ -90,6 +90,56 @@ export class UserStatsController {
     return this.userStatsService.getTotalStatsWithAllBonuses(+userId);
   }
 
+  @Get('user/:userId/combat-stats')
+  @ApiOperation({
+    summary:
+      'Lấy chi tiết combat stats đã được derive từ core stats (Attack, Defense, HP, Mana, Crit, Dodge, etc.)',
+  })
+  @ApiParam({ name: 'userId', description: 'ID của user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Combat stats chi tiết',
+    schema: {
+      type: 'object',
+      properties: {
+        coreStats: {
+          type: 'object',
+          properties: {
+            str: { type: 'number', example: 25 },
+            int: { type: 'number', example: 22 },
+            dex: { type: 'number', example: 20 },
+            vit: { type: 'number', example: 28 },
+            luk: { type: 'number', example: 15 },
+          },
+        },
+        combatStats: {
+          type: 'object',
+          properties: {
+            maxHp: { type: 'number', example: 450 },
+            maxMana: { type: 'number', example: 270 },
+            attack: { type: 'number', example: 85 },
+            defense: { type: 'number', example: 40 },
+            critRate: { type: 'number', example: 12.5 },
+            critDamage: { type: 'number', example: 175 },
+            dodgeRate: { type: 'number', example: 8.2 },
+            accuracy: { type: 'number', example: 95 },
+            lifesteal: { type: 'number', example: 5 },
+            armorPen: { type: 'number', example: 10 },
+            comboRate: { type: 'number', example: 15 },
+            counterRate: { type: 'number', example: 8 },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy user stats',
+  })
+  getDetailedCombatStats(@Param('userId') userId: string) {
+    return this.userStatsService.getDetailedCombatStats(+userId);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Tạo user stats mới' })
   @ApiBody({
