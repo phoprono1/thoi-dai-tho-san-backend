@@ -8,12 +8,16 @@ async function createTestUser() {
 
   try {
     // Tạo user test
-    const user = await authService.register('testuser', 'testpass123');
+    const user = await authService.register(
+      'testuser',
+      'testpass123',
+      '127.0.0.1',
+    );
     console.log('User created:', user);
 
     // Tạo thêm một số user khác
-    await authService.register('player1', 'password123');
-    await authService.register('player2', 'password123');
+    await authService.register('player1', 'password123', '127.0.0.1');
+    await authService.register('player2', 'password123', '127.0.0.1');
 
     console.log('Test users created successfully!');
   } catch (error) {

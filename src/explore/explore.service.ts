@@ -12,6 +12,7 @@ import { combatQueue } from '../queues/combat.queue';
 import { WildAreaService } from '../wildarea/wildarea.service';
 import { CombatResultsService } from '../combat-results/combat-results.service';
 import { UserStaminaService } from '../user-stamina/user-stamina.service';
+import { BehavioralAnalysisService } from '../common/services/behavioral-analysis.service';
 
 const REDIS_CONN = {
   host: process.env.REDIS_HOST || '127.0.0.1',
@@ -26,6 +27,7 @@ export class ExploreService {
     private readonly wildAreaService: WildAreaService,
     private readonly combatResultsService: CombatResultsService,
     private readonly userStaminaService: UserStaminaService,
+    private readonly behavioralAnalysisService: BehavioralAnalysisService,
   ) {
     this.redis = new Redis(REDIS_CONN);
   }
@@ -34,7 +36,7 @@ export class ExploreService {
     return `wildarea:cooldown:${userId}`;
   }
 
-  async startWildAreaRun(userId: number, preferredCount?: number) {
+  async startWildAreaRun(userId: number, preferredCount?: number, ip?: string) {
     let count: number;
     if (typeof preferredCount !== 'undefined' && preferredCount !== null) {
       count = Math.min(Math.max(1, Number(preferredCount) || 1), 3);
@@ -65,8 +67,11 @@ export class ExploreService {
     if (stamina.currentStamina < staminaCost)
       throw new Error('Không đủ thể lực để đi săn');
 
-    // Consume stamina
-    await this.userStaminaService.consumeStamina(userId, staminaCost);
+    // 🛡️ Consume stamina (with IP check for global limit)
+    await this.userStaminaService.consumeStamina(userId, staminaCost, ip);
+
+    // 🔍 Track farming behavior (Phase 4: Behavioral Analysis)
+    await this.behavioralAnalysisService.trackFarmingAction(userId, 'explore');
 
     // Set cooldown key (10s)
     await this.redis.set(key, '1', 'EX', 10);
@@ -94,6 +99,10 @@ export class ExploreService {
       source: 'wildarea',
     });
 
+    // 🔍 Track combat action immediately after enqueue (Phase 4: Behavioral Analysis)
+    // Don't wait for job completion to avoid missing tracking if worker fails
+    await this.behavioralAnalysisService.trackCombatAction(userId);
+
     // Wait for completion (job.waitUntilFinished requires a QueueEvents connection inside worker),
     // fallback: poll for result via Redis pubsub channel 'combat:result' as worker publishes there.
     // We'll implement a simple promise that listens to Redis channel for matching result
@@ -113,7 +122,7 @@ export class ExploreService {
         }
       });
 
-      sub.on('message', (_ch, message) => {
+      sub.on('message', async (_ch, message) => {
         try {
           const parsed = JSON.parse(message);
           // match the job by jobId which worker publishes

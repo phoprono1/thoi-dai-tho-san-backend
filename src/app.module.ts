@@ -3,6 +3,7 @@ import { join } from 'path';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -70,6 +71,13 @@ const ServeStaticDynamic: DynamicModule =
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    // 🛡️ ANTI-MULTIACCOUNTING: Rate Limiting
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 10, // 10 requests per minute (default)
+      },
+    ]),
     // Create DynamicModule instances separately and cast them to avoid
     // false-positive eslint "no-unsafe-*" rules when complex expressions
     // are used directly inside the decorator.

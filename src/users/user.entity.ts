@@ -54,4 +54,38 @@ export class User {
 
   @Column({ default: false })
   isDonor: boolean;
+
+  // ========================================
+  // 🛡️ ANTI-MULTIACCOUNTING SECURITY FIELDS
+  // ========================================
+
+  @Column({ nullable: true })
+  registrationIp: string;
+
+  @Column({ nullable: true })
+  lastLoginIp: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  lastLoginDate: Date;
+
+  @Column({ type: 'jsonb', nullable: true })
+  deviceFingerprints: string[];
+
+  @Column({ default: false })
+  isSuspicious: boolean;
+
+  @Column({ default: 0 })
+  suspiciousScore: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  tempBanUntil: Date;
+
+  @Column({ nullable: true })
+  banReason: string;
+
+  @Column({ nullable: true })
+  registrationSource: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  accountFlags: Record<string, any>;
 }

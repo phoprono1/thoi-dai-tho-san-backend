@@ -441,4 +441,114 @@ export class UsersService {
 
     return users;
   }
+
+  // ========================================
+  // 🛡️ ANTI-MULTIACCOUNTING: HELPER METHODS
+  // ========================================
+
+  /**
+   * Find all suspicious accounts (for admin dashboard)
+   */
+  async findSuspiciousAccounts(): Promise<User[]> {
+    return this.usersRepository.find({
+      where: { isSuspicious: true },
+      select: [
+        'id',
+        'username',
+        'level',
+        'registrationIp',
+        'lastLoginIp',
+        'suspiciousScore',
+        'createdAt',
+      ],
+      order: { suspiciousScore: 'DESC' },
+      take: 100,
+    });
+  }
+
+  /**
+   * Find rapid levelers (level 10+ in <6 hours)
+   */
+  async findRapidLevelers(): Promise<User[]> {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .where('user.level >= :level', { level: 10 })
+      .andWhere('user.createdAt >= :time', { time: sixHoursAgo })
+      .select([
+        'user.id',
+        'user.username',
+        'user.level',
+        'user.createdAt',
+        'user.registrationIp',
+      ])
+      .orderBy('user.level', 'DESC')
+      .take(50)
+      .getMany();
+  }
+
+  /**
+   * Find inactive alt accounts (low level, old accounts)
+   */
+  async findInactiveAlts(): Promise<User[]> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .where('user.level < :level', { level: 5 })
+      .andWhere('user.createdAt < :time', { time: thirtyDaysAgo })
+      .select([
+        'user.id',
+        'user.username',
+        'user.level',
+        'user.createdAt',
+        'user.lastLoginDate',
+        'user.registrationIp',
+      ])
+      .orderBy('user.createdAt', 'ASC')
+      .take(100)
+      .getMany();
+  }
+
+  /**
+   * Find accounts with suspicious username patterns
+   */
+  async findSuspiciousUsernamePatterns(): Promise<User[]> {
+    // Pattern: ends with _1, _2, etc.
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .where('user.username ~ :pattern', { pattern: '.*_[0-9]+$' })
+      .select([
+        'user.id',
+        'user.username',
+        'user.level',
+        'user.createdAt',
+        'user.registrationIp',
+      ])
+      .orderBy('user.createdAt', 'DESC')
+      .take(100)
+      .getMany();
+  }
+
+  /**
+   * Get top suspicious IPs (most accounts per IP)
+   */
+  async getTopSuspiciousIPs(): Promise<Array<{ ip: string; count: number }>> {
+    const result = await this.usersRepository
+      .createQueryBuilder('user')
+      .select('user.registrationIp', 'ip')
+      .addSelect('COUNT(*)', 'count')
+      .where('user.registrationIp IS NOT NULL')
+      .groupBy('user.registrationIp')
+      .having('COUNT(*) > :threshold', { threshold: 3 }) // >3 accounts
+      .orderBy('count', 'DESC')
+      .limit(20)
+      .getRawMany();
+
+    return result.map((row) => ({
+      ip: row.ip,
+      count: parseInt(row.count),
+    }));
+  }
 }

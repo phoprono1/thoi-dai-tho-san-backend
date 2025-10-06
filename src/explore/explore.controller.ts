@@ -33,6 +33,9 @@ export class ExploreController {
     if (!user || typeof user.id !== 'number')
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
 
+    // 🛡️ EXTRACT IP for global stamina limit
+    const ip = this.getIP(req);
+
     const getErrorMessage = (e: unknown) => {
       if (!e) return 'Internal Error';
       if (typeof e === 'string') return e;
@@ -53,10 +56,21 @@ export class ExploreController {
       const result = await this.exploreService.startWildAreaRun(
         user.id,
         body?.preferredCount,
+        ip,
       );
       return result;
     } catch (err: unknown) {
       throw new HttpException(getErrorMessage(err), HttpStatus.BAD_REQUEST);
     }
+  }
+
+  private getIP(req: any): string {
+    return (
+      req.headers['cf-connecting-ip'] ||
+      req.headers['x-forwarded-for']?.split(',')[0] ||
+      req.headers['x-real-ip'] ||
+      req.ip ||
+      '127.0.0.1'
+    );
   }
 }

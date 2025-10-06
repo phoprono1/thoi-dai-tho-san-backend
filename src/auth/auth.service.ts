@@ -27,23 +27,42 @@ export class AuthService {
     }
   }
 
-  login(user: any) {
+  async login(user: any, loginIp: string) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const payload = { username: user.username, sub: user.id };
+
+    // 🛡️ UPDATE LAST LOGIN IP & DATE
+    await this.usersService.update(user.id, {
+      lastLoginIp: loginIp,
+      lastLoginDate: new Date(),
+    } as Partial<any>);
+
     return {
       access_token: this.jwtService.sign(payload, { expiresIn: '7d' }),
     };
   }
 
-  async register(username: string, password: string) {
+  async register(
+    username: string,
+    password: string,
+    registrationIp: string,
+    deviceFingerprint?: string,
+  ) {
     try {
       console.log('Starting user registration for:', username);
       const hashedPassword = await bcrypt.hash(password, 10);
       console.log('Password hashed successfully');
 
+      // 🛡️ Prepare device fingerprints array
+      const deviceFingerprints = deviceFingerprint ? [deviceFingerprint] : [];
+
       const user = await this.usersService.create({
         username,
         password: hashedPassword,
+        registrationIp, // 🛡️ SAVE REGISTRATION IP
+        registrationSource: 'web',
+        accountFlags: {},
+        deviceFingerprints, // 🛡️ SAVE DEVICE FINGERPRINT
       });
       console.log('User created successfully:', user.id);
 

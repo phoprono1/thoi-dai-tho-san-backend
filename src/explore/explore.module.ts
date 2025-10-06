@@ -4,9 +4,15 @@ import { ExploreService } from './explore.service';
 import { WildAreaModule } from '../wildarea/wildarea.module';
 import { CombatResultsModule } from '../combat-results/combat-results.module';
 import { UserStaminaModule } from '../user-stamina/user-stamina.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
-  imports: [WildAreaModule, CombatResultsModule, UserStaminaModule],
+  imports: [
+    WildAreaModule,
+    CombatResultsModule,
+    UserStaminaModule,
+    CommonModule,
+  ],
   controllers: [ExploreController],
   providers: [ExploreService],
 })
