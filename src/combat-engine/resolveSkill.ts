@@ -250,7 +250,9 @@ function calculateSkillDamage(
   const variance = Math.max(1, Math.floor(damage * 0.1));
   damage += Math.floor(rng.next() * (variance * 2 + 1)) - variance;
 
-  return Math.max(1, damage);
+  // Ensure integer damage
+  const finalDamage = Math.max(1, Math.floor(damage));
+  return finalDamage;
 }
 
 function calculateSkillHealing(
@@ -290,5 +292,7 @@ function calculateSkillHealing(
   const variance = Math.max(1, Math.floor(healing * 0.1));
   healing += Math.floor(rng.next() * (variance * 2 + 1)) - variance;
 
-  return Math.max(1, healing);
+  // Ensure integer healing
+  const finalHealing = Math.max(1, Math.floor(healing));
+  return finalHealing;
 }

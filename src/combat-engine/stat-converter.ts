@@ -20,6 +20,15 @@ export const CONFIG = {
   dodgeCap: 70,
   baseMana: 50, // Base mana for all characters
   manaRegenPerTurn: 0.1, // Regen 10% maxMana per turn
+  // Softcap / clamp parameters (middle-term balancing)
+  SOFTCAP: {
+    critCap: 60, // percent
+    critK: 120,
+    dodgeCap: 50, // percent
+    dodgeK: 140,
+    accuracyCap: 150,
+    accuracyK: 120,
+  },
 };
 
 export function effective(attr: number, p = CONFIG.p) {
@@ -78,14 +87,46 @@ export function deriveCombatStats(core: {
   const maxHp = Math.floor(baseMaxHp + CONFIG.hp_from_VIT * v);
   const defense = Math.floor(baseDefense + CONFIG.def_from_VIT * v);
 
+  // Softcap helper: Michaelis-Menten style to produce diminishing returns
+  const softcap = (raw: number, cap: number, k: number) => {
+    const r = raw || 0;
+    return (cap * r) / (r + k);
+  };
+
+  // Crit: compute raw then apply softcap and hard upper bound
+  const rawCrit = CONFIG.critRate_from_LUK * l || 0;
+  const critRateSoft = softcap(
+    rawCrit,
+    CONFIG.SOFTCAP.critCap,
+    CONFIG.SOFTCAP.critK,
+  );
   const critRate = Math.min(
     CONFIG.maxCritRate,
-    CONFIG.critRate_from_LUK * l || 0,
+    Math.round(critRateSoft * 100) / 100,
   );
-  const critDamage = 150 + (CONFIG.critDamage_from_LUK * l || 0);
+  const critDamage = Math.min(
+    300,
+    Math.round((150 + (CONFIG.critDamage_from_LUK * l || 0)) * 100) / 100,
+  );
 
-  const dodgeRate = Math.min(CONFIG.dodgeCap, CONFIG.dodge_from_DEX * d || 0);
-  const accuracy = 85 + (CONFIG.accuracy_from_DEX * d || 0); // Base 85% + DEX bonus
+  // Dodge & Accuracy: softcap to avoid runaway dodge or accuracy
+  const rawDodge = CONFIG.dodge_from_DEX * d || 0;
+  const dodgeRawSoft = softcap(
+    rawDodge,
+    CONFIG.SOFTCAP.dodgeCap,
+    CONFIG.SOFTCAP.dodgeK,
+  );
+  const dodgeRate = Math.round(dodgeRawSoft * 100) / 100;
+  const rawAccuracy = 85 + (CONFIG.accuracy_from_DEX * d || 0);
+  const accuracyBonus = rawAccuracy - 85;
+  const accuracySoft =
+    85 +
+    softcap(
+      accuracyBonus,
+      CONFIG.SOFTCAP.accuracyCap - 85,
+      CONFIG.SOFTCAP.accuracyK,
+    );
+  const accuracy = Math.round(accuracySoft * 100) / 100;
 
   const armorPen = CONFIG.armorPen_from_STR * s || 0;
   const lifesteal = CONFIG.lifesteal_from_LUK * l || 0; // Lifesteal scales with luck

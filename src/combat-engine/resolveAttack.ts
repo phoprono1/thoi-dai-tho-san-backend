@@ -24,14 +24,18 @@ export function resolveAttack(
   const doOne = () => {
     const hpBefore = defender.currentHp ?? defender.stats.maxHp;
 
+    // (old hitChance logic removed) -- new bounded-delta hitChance applied below
+
     // hit chance
-    // Increase baseline from 50 to 65 so hits are more likely by default.
-    // Also raise the minimum cap to reduce extremely low hit rates and allow
-    // a slightly higher maximum to reduce rare misses against high-accuracy
-    // attackers.
-    const baseChance =
-      65 + ((attacker.stats.accuracy || 0) - (defender.stats.dodgeRate || 0));
-    const hitChance = Math.min(99, Math.max(20, baseChance));
+    // Use bounded delta between accuracy and dodge to avoid runaway hit/miss
+    const BASE_HIT = 75;
+    const MAX_DELTA = 50;
+    const HIT_MIN = 5;
+    const HIT_MAX = 95;
+    const acc = attacker.stats.accuracy || 0;
+    const dod = defender.stats.dodgeRate || 0;
+    const delta = Math.max(-MAX_DELTA, Math.min(MAX_DELTA, acc - dod));
+    const hitChance = Math.max(HIT_MIN, Math.min(HIT_MAX, BASE_HIT + delta));
     const rHit = rng.next();
     if (rHit * 100 >= hitChance) {
       logs.push({
@@ -53,6 +57,7 @@ export function resolveAttack(
       return 0;
     }
 
+    // === damage calculation ===
     // crit
     const rCrit = rng.next();
     const crit = rCrit * 100 < (attacker.stats.critRate || 0);
@@ -63,10 +68,7 @@ export function resolveAttack(
       Math.floor((defender.stats.defense || 0) * (1 - armorPen / 100)),
     );
 
-    // Percentage-based defense reduction instead of linear subtraction
-    // This prevents invincibility at high defense while still making defense meaningful
-    // Formula: damage = attack * (1 - def/(def + 100))
-    // Examples: def=50 → 33% reduction, def=100 → 50%, def=200 → 67%
+    // Percentage-based defense reduction
     const defenseReduction = effectiveDef / (effectiveDef + 100);
     const rawBase = Math.max(
       1,
@@ -196,5 +198,39 @@ export function resolveAttack(
     }
   }
 
-  return { logs, damageTotal, actionOrderEnd: actionOrder };
+  // Post-process logs: aggregate consecutive miss entries from same actor->target
+  const compressed: CombatLogEntry[] = [];
+  for (let i = 0; i < logs.length; i++) {
+    const cur = logs[i];
+    if (cur.type === 'miss') {
+      // Count consecutive misses with same actor/target
+      let count = 1;
+      let j = i + 1;
+      while (
+        j < logs.length &&
+        logs[j].type === 'miss' &&
+        logs[j].actorId === cur.actorId &&
+        logs[j].targetId === cur.targetId
+      ) {
+        count++;
+        j++;
+      }
+
+      if (count === 1) {
+        compressed.push(cur);
+      } else {
+        const aggregated: CombatLogEntry = {
+          ...cur,
+          description: `${cur.actorName} đánh trượt ${cur.targetName} ${count} lần liên tiếp`,
+          flags: { ...(cur.flags || {}), dodgeCount: count },
+        } as CombatLogEntry;
+        compressed.push(aggregated);
+      }
+      i = j - 1;
+    } else {
+      compressed.push(cur);
+    }
+  }
+
+  return { logs: compressed, damageTotal, actionOrderEnd: actionOrder };
 }

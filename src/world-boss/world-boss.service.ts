@@ -402,10 +402,11 @@ export class WorldBossService {
       seed: Date.now(),
     });
 
-    // Calculate total damage dealt to boss
-    const totalDamage = combatResult.logs
+    // Calculate total damage dealt to boss (ensure integer damage for DB bigint columns)
+    const totalDamageFloat = combatResult.logs
       .filter((log) => log.actorIsPlayer && log.damage && log.damage > 0)
       .reduce((sum, log) => sum + (log.damage || 0), 0);
+    const totalDamage = Math.floor(Number(totalDamageFloat) || 0);
 
     // Get current boss data for phase calculation
     const currentBoss = await this.worldBossRepository.findOne({
@@ -428,6 +429,7 @@ export class WorldBossService {
 
     return {
       logs: combatResult.logs,
+      // totalDamage is integer (floored) to keep DB bigint fields safe
       totalDamage,
       newPhase,
       totalBossDamage: newTotalDamage,
@@ -471,19 +473,22 @@ export class WorldBossService {
     });
 
     if (existingRanking) {
+      // Ensure damage is integer before adding to bigint column
+      const intDamage = Math.floor(Number(damage) || 0);
       existingRanking.totalDamage =
-        Number(existingRanking.totalDamage) + Number(damage);
+        Number(existingRanking.totalDamage) + intDamage;
       existingRanking.attackCount = Number(existingRanking.attackCount) + 1;
-      existingRanking.lastDamage = Number(damage);
+      existingRanking.lastDamage = intDamage;
       await this.bossDamageRankingRepository.save(existingRanking);
     } else {
+      const intDamage = Math.floor(Number(damage) || 0);
       const ranking = this.bossDamageRankingRepository.create({
         bossId,
         userId,
         rankingType: RankingType.INDIVIDUAL,
-        totalDamage: damage,
+        totalDamage: intDamage,
         attackCount: 1,
-        lastDamage: damage,
+        lastDamage: intDamage,
         rank: 0, // Will be calculated later
       });
       await this.bossDamageRankingRepository.save(ranking);
@@ -506,21 +511,23 @@ export class WorldBossService {
         });
 
       if (existingGuildRanking) {
+        const intDamage = Math.floor(Number(damage) || 0);
         existingGuildRanking.totalDamage =
-          Number(existingGuildRanking.totalDamage) + Number(damage);
+          Number(existingGuildRanking.totalDamage) + intDamage;
         existingGuildRanking.attackCount =
           Number(existingGuildRanking.attackCount) + 1;
-        existingGuildRanking.lastDamage = Number(damage);
+        existingGuildRanking.lastDamage = intDamage;
         await this.bossDamageRankingRepository.save(existingGuildRanking);
       } else {
+        const intDamage = Math.floor(Number(damage) || 0);
         const guildRanking = this.bossDamageRankingRepository.create({
           bossId,
           userId, // Representative user for guild
           guildId: user.guild.id,
           rankingType: RankingType.GUILD,
-          totalDamage: damage,
+          totalDamage: intDamage,
           attackCount: 1,
-          lastDamage: damage,
+          lastDamage: intDamage,
           rank: 0,
         });
         await this.bossDamageRankingRepository.save(guildRanking);
