@@ -185,8 +185,26 @@ export class AdvancementCheckResultDto {
       required: number;
       current: number;
     }>;
+    // Optional path diagnostic used when no admin mapping exists between classes
+    path?: {
+      message: string;
+      fromClassId?: number | null;
+      toClassId: number;
+    };
   };
   availableClasses: CharacterClassResponseDto[];
+  // Optional: richer candidate metadata for client rendering. Each candidate
+  // includes the class DTO, optional mapping record (admin-configured), a
+  // boolean whether the user can currently advance to it, and any
+  // missingRequirements diagnostics. Frontend may use this to show locked
+  // options with requirements, while `availableClasses` remains the simple
+  // list of immediately selectable classes.
+  candidates?: Array<{
+    class: CharacterClassResponseDto;
+    mapping?: any;
+    canAdvance: boolean;
+    missingRequirements: any;
+  }>;
 }
 
 export class PerformAdvancementDto {

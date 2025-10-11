@@ -138,42 +138,76 @@ export class CharacterClassService {
         !cls.previousClassId || cls.previousClassId === user.characterClass?.id,
     );
 
-    const checkResults = await Promise.all(
-      validClasses.map((cls) =>
-        this.checkAdvancementRequirements(userId, cls.id),
-      ),
+    // For each valid next-tier class, find the admin-configured mapping (if any)
+    // and run requirement checks. We return a `candidates` array containing
+    // mapping metadata and requirement diagnostics so the client can show
+    // choosable options even when requirements are not yet met. Hidden/random
+    // mappings (allowPlayerChoice=false) will NOT be included in the
+    // `availableClasses` list that the player UI uses to render choices.
+    const candidates = await Promise.all(
+      validClasses.map(async (cls) => {
+        const mapping = await this.characterClassAdvancementRepository.findOne({
+          where: {
+            fromClassId: user.characterClass?.id || null,
+            toClassId: cls.id,
+          },
+        });
+
+        // If there's no mapping, treat as not available for players
+        if (!mapping) {
+          return {
+            class: this.mapToResponseDto(cls),
+            mapping: null,
+            canAdvance: false,
+            missingRequirements: {
+              path: {
+                message: `No advancement path found from class ${user.characterClass?.id || 'none'} to class ${cls.id}`,
+                fromClassId: user.characterClass?.id || null,
+                toClassId: cls.id,
+              },
+            },
+          };
+        }
+
+        const check = await this.checkAdvancementRequirements(userId, cls.id);
+
+        return {
+          class: this.mapToResponseDto(cls),
+          mapping,
+          canAdvance: check.canAdvance,
+          missingRequirements: check.missingRequirements,
+        };
+      }),
     );
 
-    const availableClassesFiltered = validClasses.filter(
-      (_, index) => checkResults[index].canAdvance,
+    // Player-visible classes are those where the admin mapping allows player choice
+    const playerVisible = candidates
+      .filter((c) => c.mapping && c.mapping.allowPlayerChoice)
+      .map((c) => c.class);
+
+    // Determine if any player-visible option is immediately advanceable
+    const anyCanAdvance = candidates.some(
+      (c) => c.mapping && c.mapping.allowPlayerChoice && c.canAdvance,
+    );
+
+    // Pick first non-advanceable player-visible missingRequirements for diagnostics
+    const firstMissing = candidates.find(
+      (c) => c.mapping && c.mapping.allowPlayerChoice && !c.canAdvance,
     );
 
     return {
-      canAdvance: availableClassesFiltered.length > 0,
-      missingRequirements:
-        checkResults.find((result) => !result.canAdvance)
-          ?.missingRequirements || {},
-      availableClasses: availableClassesFiltered.map((cls) =>
-        this.mapToResponseDto(cls),
-      ),
+      canAdvance: anyCanAdvance,
+      missingRequirements: firstMissing?.missingRequirements || {},
+      availableClasses: playerVisible,
+      candidates,
     };
   }
 
   public async checkAdvancementRequirements(
     userId: number,
     targetClassId: number,
-  ): Promise<{
-    canAdvance: boolean;
-    missingRequirements: Record<string, unknown>;
-  }> {
-    const targetClass = await this.characterClassRepository.findOne({
-      where: { id: targetClassId },
-    });
-
-    if (!targetClass) {
-      throw new NotFoundException('Target class not found');
-    }
-
+  ): Promise<AdvancementCheckResultDto> {
+    // Basic sanity checks
     const user = await this.userRepository.findOne({
       where: { id: userId },
       relations: ['characterClass'],
@@ -182,25 +216,48 @@ export class CharacterClassService {
       throw new NotFoundException('User not found');
     }
 
+    const userStats = await this.userStatRepository.findOne({
+      where: { userId },
+    });
+    if (!userStats) {
+      throw new NotFoundException('User stats not found');
+    }
+
+    const targetClass = await this.characterClassRepository.findOne({
+      where: { id: targetClassId },
+    });
+    if (!targetClass) {
+      throw new NotFoundException('Target class not found');
+    }
+
     const missingRequirements: Record<string, unknown> = {};
 
     console.log(
       `Checking advancement requirements for userId=${userId}, targetClassId=${targetClassId}`,
     );
 
-    // ✅ NEW: Check advancement path requirements
-    const advancementPath =
-      await this.characterClassAdvancementRepository.findOne({
-        where: {
-          fromClassId: user.characterClass?.id || null,
-          toClassId: targetClassId,
-        },
-      });
+    // Check advancement path (admin-configured mapping)
+    const advancementPath = await this.characterClassAdvancementRepository.findOne({
+      where: {
+        fromClassId: user.characterClass?.id || null,
+        toClassId: targetClassId,
+      },
+    });
 
+    // If no explicit advancement mapping exists, return a negative result
+    // instead of throwing. Clients can then show friendly diagnostics.
     if (!advancementPath) {
-      throw new BadRequestException(
-        `No advancement path found from class ${user.characterClass?.id || 'none'} to class ${targetClassId}`,
-      );
+      missingRequirements.path = {
+        message: `No advancement path found from class ${user.characterClass?.id || 'none'} to class ${targetClassId}`,
+        fromClassId: user.characterClass?.id || null,
+        toClassId: targetClassId,
+      };
+
+      return {
+        canAdvance: false,
+        missingRequirements,
+        availableClasses: [],
+      };
     }
 
     console.log(`Advancement path found:`, {
@@ -210,14 +267,9 @@ export class CharacterClassService {
       requirements: JSON.stringify(advancementPath.requirements, null, 2),
     });
 
-    // Check advancement path level requirement
-    if (user.level < advancementPath.levelRequired) {
-      missingRequirements.level = advancementPath.levelRequired;
-    }
-
     // Check advancement path specific requirements
     if (advancementPath.requirements) {
-      // Check items requirement
+      // Items
       if (advancementPath.requirements.items) {
         const missingItems: any[] = [];
         for (const itemReq of advancementPath.requirements.items) {
@@ -228,9 +280,6 @@ export class CharacterClassService {
             (sum, item) => sum + item.quantity,
             0,
           );
-          console.log(
-            `Item check: userId=${userId}, itemId=${itemReq.itemId}, itemName=${itemReq.itemName}, required=${itemReq.quantity}, current=${totalQuantity}`,
-          );
           if (totalQuantity < itemReq.quantity) {
             missingItems.push({
               itemId: itemReq.itemId,
@@ -240,26 +289,20 @@ export class CharacterClassService {
             });
           }
         }
-        if (missingItems.length > 0) {
-          missingRequirements.items = missingItems;
-        }
+        if (missingItems.length > 0) missingRequirements.items = missingItems;
       }
 
-      // Check quests requirement
+      // Quests
       if (advancementPath.requirements.quests) {
         const missingQuests: any[] = [];
         for (const questReq of advancementPath.requirements.quests) {
-          // Check if quest is completed using QuestService
           const isCompleted = await this.questService.isQuestCompleted(
             userId,
-            questReq.questId,
-          );
-          console.log(
-            `Quest check: userId=${userId}, questId=${questReq.questId}, questName=${questReq.questName}, isCompleted=${isCompleted}`,
+            Number(questReq.questId),
           );
           if (!isCompleted) {
             missingQuests.push({
-              questId: questReq.questId,
+              questId: Number(questReq.questId),
               questName: questReq.questName,
               status: 'not_completed',
             });
@@ -270,7 +313,7 @@ export class CharacterClassService {
         }
       }
 
-      // Check dungeons requirement
+      // Dungeons
       if (advancementPath.requirements.dungeons) {
         const missingDungeons: any[] = [];
         for (const dungeonReq of advancementPath.requirements.dungeons) {
@@ -285,9 +328,6 @@ export class CharacterClassService {
             (result) => result.userIds && result.userIds.includes(userId),
           ).length;
 
-          console.log(
-            `Dungeon check: userId=${userId}, dungeonId=${dungeonReq.dungeonId}, dungeonName=${dungeonReq.dungeonName}, required=${dungeonReq.requiredCompletions}, current=${userCompletions}`,
-          );
           if (userCompletions < dungeonReq.requiredCompletions) {
             missingDungeons.push({
               dungeonId: dungeonReq.dungeonId,
@@ -302,51 +342,49 @@ export class CharacterClassService {
         }
       }
 
-      // Check stats requirement
+      // Stats
       if (advancementPath.requirements.stats?.minTotalStats) {
-        const userStats = await this.userStatRepository.findOne({
-          where: { userId },
-        });
-        if (userStats) {
-          const totalStats =
-            userStats.strength +
-            userStats.intelligence +
-            userStats.dexterity +
-            userStats.vitality +
-            userStats.luck;
-          if (totalStats < advancementPath.requirements.stats.minTotalStats) {
-            missingRequirements.stats = {
-              required: advancementPath.requirements.stats.minTotalStats,
-              current: totalStats,
-            };
+        const us = await this.userStatRepository.findOne({ where: { userId } });
+          if (us) {
+            const totalStats =
+              us.strength +
+              us.intelligence +
+              us.dexterity +
+              us.vitality +
+              us.luck;
+            if (
+              totalStats <
+              advancementPath.requirements.stats.minTotalStats
+            ) {
+              missingRequirements.stats = {
+                required: advancementPath.requirements.stats.minTotalStats,
+                current: totalStats,
+              };
+            }
           }
-        }
       }
     }
 
-    // Check level requirement
+    // Check level requirement from target class
     if (user.level < targetClass.requiredLevel) {
       missingRequirements.level = targetClass.requiredLevel;
     }
 
-    // Check advancement requirements if any
+    // Check target class's built-in advancementRequirements (dungeons/quests/items)
     if (targetClass.advancementRequirements) {
-      // Check dungeon completions
+      // Dungeons
       if (targetClass.advancementRequirements.dungeons) {
         const missingDungeons: any[] = [];
         for (const dungeon of targetClass.advancementRequirements.dungeons) {
-          // Filter results where user is in the userIds array
           const userDungeonResults = await this.combatResultRepository.find({
             where: {
               dungeonId: dungeon.dungeonId,
               result: CombatResultType.VICTORY,
             },
           });
-
           const userCompletions = userDungeonResults.filter((result) =>
             result.userIds.includes(userId),
           ).length;
-
           if (userCompletions < dungeon.requiredCompletions) {
             missingDungeons.push({
               dungeonId: dungeon.dungeonId,
@@ -361,16 +399,14 @@ export class CharacterClassService {
         }
       }
 
-      // Check quest completions
+      // Quests
       if (targetClass.advancementRequirements.quests) {
         const missingQuests: any[] = [];
         for (const quest of targetClass.advancementRequirements.quests) {
-          // Check if quest is completed by user
           const isQuestCompleted = await this.questService.isQuestCompleted(
             userId,
             quest.questId,
           );
-
           if (!isQuestCompleted) {
             missingQuests.push({
               questId: quest.questId,
@@ -383,20 +419,14 @@ export class CharacterClassService {
         }
       }
 
-      // Check item requirements
+      // Items
       if (targetClass.advancementRequirements.items) {
         const missingItems: any[] = [];
         for (const item of targetClass.advancementRequirements.items) {
-          // Check user inventory for required items
           const userItem = await this.userItemRepository.findOne({
-            where: {
-              userId: userId,
-              itemId: item.itemId,
-            },
+            where: { userId: userId, itemId: item.itemId },
           });
-
           const currentQuantity = userItem?.quantity || 0;
-
           if (currentQuantity < item.quantity) {
             missingItems.push({
               itemId: item.itemId,
@@ -406,9 +436,7 @@ export class CharacterClassService {
             });
           }
         }
-        if (missingItems.length > 0) {
-          missingRequirements.items = missingItems;
-        }
+        if (missingItems.length > 0) missingRequirements.items = missingItems;
       }
     }
 
@@ -417,6 +445,7 @@ export class CharacterClassService {
     return {
       canAdvance,
       missingRequirements,
+      availableClasses: [],
     };
   }
 
