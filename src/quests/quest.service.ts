@@ -41,8 +41,35 @@ export class QuestService {
     const quest = this.questRepository.create(questData);
     const savedQuest = await this.questRepository.save(quest);
 
-    // Auto-assign quest to all users
-    await this.assignQuestToAllUsers(savedQuest.id);
+    // Auto-assign quest to all users unless this quest declares dependencies
+    // (i.e. it's intended to be a chained/locked quest). Chained quests
+    // should be assigned to users only when their prerequisites are met.
+    const hasPrereqs =
+      questData?.dependencies &&
+      Array.isArray(questData.dependencies.prerequisiteQuests) &&
+      questData.dependencies.prerequisiteQuests.length > 0;
+
+    if (!hasPrereqs) {
+      await this.assignQuestToAllUsers(savedQuest.id);
+    } else {
+      // If this quest was created after some players already completed
+      // the prerequisite quests, assign it to those players now. This
+      // allows admins to add chained quests retroactively without
+      // requiring players to re-trigger completion events.
+      try {
+        const prereqs = questData.dependencies.prerequisiteQuests as number[];
+        if (Array.isArray(prereqs) && prereqs.length > 0) {
+          // Run the assignment in background (non-blocking) so admin API
+          // remains responsive. We don't await the promise here on purpose.
+          // Errors will be logged by the helper.
+          void this.assignQuestToQualifiedUsers(savedQuest.id, prereqs);
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Failed to schedule retroactive assignment for quest ${savedQuest.id}: ${String(e)}`,
+        );
+      }
+    }
 
     return savedQuest;
   }
@@ -90,6 +117,16 @@ export class QuestService {
       const toCreate = [] as Partial<UserQuest>[];
       const today = new Date();
       for (const q of missingQuests) {
+        // Skip auto-assigning quests that declare prerequisiteQuests.
+        // These are intended to be chained/locked quests and should only
+        // be assigned when a player's prerequisites are satisfied.
+        const hasPrereqs =
+          q.dependencies &&
+          Array.isArray(q.dependencies.prerequisiteQuests) &&
+          q.dependencies.prerequisiteQuests.length > 0;
+
+        if (hasPrereqs) continue;
+
         if (!existingQuestIds.has(q.id)) {
           toCreate.push({
             userId,
@@ -201,23 +238,30 @@ export class QuestService {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     const userLevel = user?.level || 0;
 
-    return activeRefreshed.filter((uq) => {
+    // Build final list asynchronously so we can evaluate dependencies per-quest
+    const finalList: UserQuest[] = [];
+    for (const uq of activeRefreshed) {
       // Always hide fully completed+claimed quests
       if (uq.status === QuestStatus.COMPLETED && uq.rewardsClaimed === true)
-        return false;
+        continue;
 
-      // If the quest is AVAILABLE, omit it when the quest requires a
-      // higher level than the user currently has.
+      // For AVAILABLE quests, enforce level requirement and dependency checks
       if (uq.status === QuestStatus.AVAILABLE && uq.quest) {
         const qReq =
           uq.quest.requiredLevel ?? uq.quest.dependencies?.requiredLevel ?? 0;
         const required = Number(qReq) || 0;
-        if (required > userLevel) return false;
+        if (required > userLevel) continue;
+
+        // Check quest dependencies (prerequisite quests / requiredLevel)
+        const depsOk = await this.checkQuestDependencies(userId, uq.quest.id);
+        if (!depsOk) continue;
       }
 
-      // Otherwise return the quest (including IN_PROGRESS / COMPLETED unclaimed)
-      return true;
-    });
+      // Otherwise include the quest (IN_PROGRESS / COMPLETED unclaimed / available with deps OK)
+      finalList.push(uq);
+    }
+
+    return finalList;
   }
 
   async startQuest(userId: number, questId: number): Promise<UserQuest> {
@@ -459,6 +503,17 @@ export class QuestService {
       userQuest.completionCount = (userQuest.completionCount || 0) + 1;
       (userQuest as any).rewardsClaimed = false;
       await this.userQuestRepository.save(userQuest);
+      // After marking this quest completed for the user, attempt to assign
+      // any quests that declare this quest as a prerequisite. This implements
+      // the per-user chained-quest behavior: dependent quests are only
+      // assigned to the player who satisfied the prerequisites.
+      try {
+        await this.assignDependentQuestsToUser(userId, userQuest.questId);
+      } catch (e) {
+        this.logger.warn(
+          `Failed to auto-assign dependent quests for user ${userId} after completing quest ${userQuest.questId}: ${String(e)}`,
+        );
+      }
     }
 
     return allCompleted;
@@ -875,18 +930,10 @@ export class QuestService {
       },
     );
 
-    // Check if this combat result was already processed for quests
-    const existingTracking = await this.questCombatTrackingRepository.findOne({
-      where: { userId, combatResultId },
-    });
-
-    if (existingTracking?.questProgressUpdated) {
-      console.log(
-        '⚠️ [QUEST SERVICE] Combat already processed, skipping:',
-        combatResultId,
-      );
-      return; // Already processed
-    }
+    // Note: we don't early-skip processing on a single tracking row here
+    // because a single combatResult may update multiple different quests for
+    // the same user. We'll check per-quest below to avoid double-processing
+    // for the same (user, combatResult, quest) tuple.
 
     // Load the combat result so we can compare timestamps, dungeon and result
     const combatResult = await this.combatResultRepository.findOne({
@@ -1133,14 +1180,22 @@ export class QuestService {
       if (progressUpdated) {
         await this.userQuestRepository.save(userQuest);
 
-        // Mark combat result as processed for this quest
-        await this.questCombatTrackingRepository.save({
-          userId,
-          questId: quest.id,
-          combatResultId,
-          combatCompletedAt: new Date(),
-          questProgressUpdated: true,
-        });
+        // Ensure we only mark this (user, combatResult, quest) once. Check
+        // for an existing tracking row that matches the quest as well.
+        const existingForQuest =
+          await this.questCombatTrackingRepository.findOne({
+            where: { userId, combatResultId, questId: quest.id },
+          });
+
+        if (!existingForQuest || !existingForQuest.questProgressUpdated) {
+          await this.questCombatTrackingRepository.save({
+            userId,
+            questId: quest.id,
+            combatResultId,
+            combatCompletedAt: new Date(),
+            questProgressUpdated: true,
+          });
+        }
 
         // Check if quest is now completed
         await this.checkQuestCompletion(userId, quest.id);
@@ -1170,8 +1225,8 @@ export class QuestService {
     const dailyQuestsCompleted = allUserQuests.filter(
       (uq) =>
         uq.status === QuestStatus.COMPLETED &&
-        uq.questId &&
-        uq.questId.toString().includes('daily'),
+        uq.quest &&
+        uq.quest.type === QuestType.DAILY,
     ).length;
 
     return {
@@ -1254,6 +1309,133 @@ export class QuestService {
 
     if (userQuests.length > 0) {
       await this.userQuestRepository.save(userQuests);
+    }
+  }
+
+  // Assign dependent quests to a single user after they complete a prerequisite.
+  // Finds quests that list `completedQuestId` in their prerequisiteQuests, then
+  // verifies that all prerequisites for each candidate quest are satisfied for
+  // this user before creating a `user_quests` row for them.
+  private async assignDependentQuestsToUser(
+    userId: number,
+    completedQuestId: number,
+  ): Promise<void> {
+    // Find candidate quests that reference this quest as a prerequisite
+    const candidates = await this.questRepository
+      .createQueryBuilder('q')
+      .where("q.dependencies->'$.prerequisiteQuests' IS NOT NULL")
+      .getMany();
+
+    if (!candidates || candidates.length === 0) return;
+
+    for (const q of candidates) {
+      try {
+        const prereqs = q.dependencies?.prerequisiteQuests || [];
+        if (!Array.isArray(prereqs) || prereqs.length === 0) continue;
+
+        // Skip if this candidate doesn't actually list the completedQuestId
+        if (!prereqs.includes(completedQuestId)) continue;
+
+        // Ensure user does not already have a UserQuest for this quest
+        const existing = await this.userQuestRepository.findOne({
+          where: { userId, questId: q.id },
+        });
+        if (existing) continue;
+
+        // Check all prerequisites are satisfied for this user
+        let allDepsOk = true;
+        for (const pid of prereqs) {
+          const ok = await this.isQuestCompleted(userId, pid);
+          if (!ok) {
+            allDepsOk = false;
+            break;
+          }
+        }
+
+        if (!allDepsOk) continue;
+
+        // Create the user_quest row in AVAILABLE state (admin could set auto-start)
+        const toCreate: Partial<UserQuest> = {
+          userId,
+          questId: q.id,
+          status: QuestStatus.AVAILABLE,
+          progress: {},
+        };
+
+        await this.userQuestRepository.save(toCreate as any);
+        this.logger.debug(`Assigned dependent quest ${q.id} to user ${userId}`);
+      } catch (err) {
+        this.logger.warn(
+          `Error assigning dependent quest ${q.id} to user ${userId}: ${String(err)}`,
+        );
+      }
+    }
+  }
+
+  // Assign a newly-created quest (which has prerequisites) to any users who
+  // have already completed all of its prerequisite quests. This is used when
+  // an admin creates a chained quest after some players have already met
+  // the prerequisites; we want them to receive the new quest immediately.
+  private async assignQuestToQualifiedUsers(
+    questId: number,
+    prerequisiteQuestIds: number[],
+  ): Promise<void> {
+    try {
+      if (
+        !Array.isArray(prerequisiteQuestIds) ||
+        prerequisiteQuestIds.length === 0
+      )
+        return;
+
+      // Load all users (only ids needed) - for large userbases this should be
+      // optimized or run as a background job; this implementation is simple
+      // and synchronous for the admin API convenience.
+      const users = await this.userRepository.find({ select: ['id'] });
+
+      for (const u of users) {
+        try {
+          const userId = u.id;
+
+          // Check all prerequisite quests are completed for this user
+          let allOk = true;
+          for (const pid of prerequisiteQuestIds) {
+            const ok = await this.isQuestCompleted(userId, pid);
+            if (!ok) {
+              allOk = false;
+              break;
+            }
+          }
+
+          if (!allOk) continue;
+
+          // Ensure we don't duplicate an existing user_quest row
+          const existing = await this.userQuestRepository.findOne({
+            where: { userId, questId },
+          });
+          if (existing) continue;
+
+          // Create an AVAILABLE user_quest for this qualified user
+          const toCreate: Partial<UserQuest> = {
+            userId,
+            questId,
+            status: QuestStatus.AVAILABLE,
+            progress: {},
+          };
+
+          await this.userQuestRepository.save(toCreate as any);
+          this.logger.debug(
+            `Retroactively assigned quest ${questId} to user ${userId}`,
+          );
+        } catch (inner) {
+          this.logger.warn(
+            `Failed to evaluate/assign quest ${questId} to user ${u.id}: ${String(inner)}`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `assignQuestToQualifiedUsers failed for quest ${questId}: ${String(err)}`,
+      );
     }
   }
 

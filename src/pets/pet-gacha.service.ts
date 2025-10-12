@@ -428,16 +428,14 @@ export class PetGachaService {
 
     // Perform 10 pulls
     for (let i = 0; i < 10; i++) {
-      // Last pull guaranteed if no high rarity yet
-      const isLastPull = i === 9;
-      const hasHighRarity = pulls.some((pull) => pull.rarity >= 4);
-      const forceGuaranteed = isLastPull && !hasHighRarity;
-
+      // Do NOT force a guaranteed high-rarity within a 10x pull.
+      // Pity/guarantee behavior should be controlled by banner.guaranteedPullCount
+      // and user-specific pity records. This respects admin settings.
       const result = await this.performSinglePullInternal(
         userId,
         banner,
         pity,
-        forceGuaranteed,
+        false,
       );
       pulls.push(result);
 

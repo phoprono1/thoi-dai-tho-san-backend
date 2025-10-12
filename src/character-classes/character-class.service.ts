@@ -237,12 +237,13 @@ export class CharacterClassService {
     );
 
     // Check advancement path (admin-configured mapping)
-    const advancementPath = await this.characterClassAdvancementRepository.findOne({
-      where: {
-        fromClassId: user.characterClass?.id || null,
-        toClassId: targetClassId,
-      },
-    });
+    const advancementPath =
+      await this.characterClassAdvancementRepository.findOne({
+        where: {
+          fromClassId: user.characterClass?.id || null,
+          toClassId: targetClassId,
+        },
+      });
 
     // If no explicit advancement mapping exists, return a negative result
     // instead of throwing. Clients can then show friendly diagnostics.
@@ -345,23 +346,20 @@ export class CharacterClassService {
       // Stats
       if (advancementPath.requirements.stats?.minTotalStats) {
         const us = await this.userStatRepository.findOne({ where: { userId } });
-          if (us) {
-            const totalStats =
-              us.strength +
-              us.intelligence +
-              us.dexterity +
-              us.vitality +
-              us.luck;
-            if (
-              totalStats <
-              advancementPath.requirements.stats.minTotalStats
-            ) {
-              missingRequirements.stats = {
-                required: advancementPath.requirements.stats.minTotalStats,
-                current: totalStats,
-              };
-            }
+        if (us) {
+          const totalStats =
+            us.strength +
+            us.intelligence +
+            us.dexterity +
+            us.vitality +
+            us.luck;
+          if (totalStats < advancementPath.requirements.stats.minTotalStats) {
+            missingRequirements.stats = {
+              required: advancementPath.requirements.stats.minTotalStats,
+              current: totalStats,
+            };
           }
+        }
       }
     }
 

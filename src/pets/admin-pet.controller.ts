@@ -171,7 +171,12 @@ export class AdminPetController {
 
   @Get('banners/:id')
   async getBanner(@Param('id', ParseIntPipe) id: number) {
-    return this.petGachaService.getBannerById(id);
+    // Admin should be able to view banners regardless of active window.
+    const banner = await this.petBannerRepository.findOne({ where: { id } });
+    if (!banner) {
+      throw new BadRequestException('Banner not found');
+    }
+    return banner;
   }
 
   @Post('banners')
@@ -221,6 +226,7 @@ export class AdminPetController {
       if (dto.endDate) updateData.endDate = new Date(dto.endDate);
       if (dto.bannerImage !== undefined)
         updateData.bannerImage = dto.bannerImage;
+      if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
       if (dto.sortOrder !== undefined) updateData.sortOrder = dto.sortOrder;
 
       await this.petBannerRepository.update(id, updateData);

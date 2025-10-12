@@ -32,6 +32,7 @@ import { DonorsModule } from './donors/donors.module';
 import { TitlesModule } from './titles/titles.module';
 import { CraftingModule } from './crafting/crafting.module';
 import { QuestModule } from './quests/quest.module';
+import { StoryEventsModule } from './story-events/story-events.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MonsterModule } from './monsters/monster.module';
 import { AdminImportModule } from './admin-import/admin-import.module';
@@ -137,6 +138,7 @@ const ServeStaticDynamic: DynamicModule =
     TitlesModule,
     CraftingModule,
     QuestModule,
+    StoryEventsModule,
     MonsterModule,
     UploadsModule,
     GachaModule,

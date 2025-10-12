@@ -20,6 +20,7 @@ import { Monster } from '../monsters/monster.entity';
 import { ItemsService } from '../items/items.service';
 import { SkillService } from '../player-skills/skill.service';
 import { QuestService } from '../quests/quest.service';
+import { StoryEventsService } from '../story-events/story-events.service';
 import { PetService } from '../pets/pet.service';
 import { PetAbility } from '../pets/entities/pet-ability.entity';
 import { runCombat } from '../combat-engine/engine';
@@ -49,6 +50,7 @@ export class CombatResultsService {
     private itemsService: ItemsService,
     private skillService: SkillService,
     private questService: QuestService,
+    private storyEventsService: StoryEventsService,
     private petService: PetService,
   ) {}
 
@@ -1190,6 +1192,7 @@ export class CombatResultsService {
           '🔍 [WILDAREA QUEST DEBUG] Updating quest progress for user:',
           user.id,
         );
+        // Update legacy quest system
         await this.questService.updateQuestProgressFromCombat(
           user.id,
           savedCombat.id,
@@ -1198,6 +1201,23 @@ export class CombatResultsService {
             bossDefeated: false, // wildarea doesn't have bosses typically
           },
         );
+        // Update story/event system contributions as well
+        try {
+          await this.storyEventsService.processCombatForUser(
+            user.id,
+            savedCombat.id,
+            {
+              enemyKills,
+              bossDefeated: false,
+              dungeonId: null,
+            },
+          );
+        } catch (e) {
+          console.warn(
+            'Failed to process story events for user after wildarea combat:',
+            e,
+          );
+        }
         console.log(
           `✅ [WILDAREA QUEST] Successfully updated quest progress for user ${user.id} - defeated ${enemyKills.length} enemy types`,
         );

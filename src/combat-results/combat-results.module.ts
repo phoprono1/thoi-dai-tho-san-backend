@@ -20,6 +20,7 @@ import { SkillModule } from '../player-skills/skill.module';
 import { QuestModule } from '../quests/quest.module';
 import { PetsModule } from '../pets/pets.module';
 import { PetAbility } from '../pets/entities/pet-ability.entity';
+import { StoryEventsModule } from '../story-events/story-events.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { PetAbility } from '../pets/entities/pet-ability.entity';
     SkillModule,
     QuestModule,
     PetsModule,
+    StoryEventsModule,
   ],
   providers: [CombatResultsService],
   controllers: [CombatResultsController],

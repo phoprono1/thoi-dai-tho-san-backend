@@ -44,8 +44,10 @@ export class UserPetBannerPity {
   banner: PetBanner;
 
   // Helper methods
+  // Determine if the NEXT pull should be guaranteed.
+  // Use pullCount + 1 >= guaranteedPullCount so that guarantee occurs on the Nth pull.
   isGuaranteedNext(banner: PetBanner): boolean {
-    return this.pullCount >= banner.guaranteedPullCount;
+    return this.pullCount + 1 >= banner.guaranteedPullCount;
   }
 
   getRemainingForGuaranteed(banner: PetBanner): number {
