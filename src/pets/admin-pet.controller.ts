@@ -47,6 +47,8 @@ export interface CreateBannerDto {
   description: string;
   bannerType: 'standard' | 'featured' | 'limited' | 'event';
   costPerPull: number;
+  costItemId?: number | null;
+  costItemQuantity?: number;
   guaranteedRarity: number;
   guaranteedPullCount: number;
   featuredPets: Array<{
@@ -197,6 +199,8 @@ export class AdminPetController {
         description: dto.description,
         bannerType: dto.bannerType,
         costPerPull: dto.costPerPull,
+        costItemId: dto.costItemId === null ? null : (dto.costItemId !== undefined ? Number(dto.costItemId) : null),
+        costItemQuantity: dto.costItemQuantity !== undefined ? Number(dto.costItemQuantity) || 1 : 1,
         guaranteedRarity: dto.guaranteedRarity,
         guaranteedPullCount: dto.guaranteedPullCount,
         pityThresholds: pity,
@@ -221,6 +225,7 @@ export class AdminPetController {
     @Body() dto: Partial<CreateBannerDto>,
   ) {
     try {
+      console.debug('Admin:updateBanner incoming dto:', dto);
       const updateData: any = {};
 
       if (dto.name) updateData.name = dto.name;
@@ -237,6 +242,12 @@ export class AdminPetController {
           pullCount: Math.max(1, Number(t.pullCount) || 1),
         }));
       }
+      if (dto.costItemId !== undefined) {
+        updateData.costItemId = dto.costItemId === null ? null : Number(dto.costItemId);
+      }
+      if (dto.costItemQuantity !== undefined) {
+        updateData.costItemQuantity = Number(dto.costItemQuantity) || 1;
+      }
       if (dto.featuredPets) updateData.featuredPets = dto.featuredPets;
       if (dto.dropRates) updateData.dropRates = dto.dropRates;
       if (dto.startDate) updateData.startDate = new Date(dto.startDate);
@@ -246,8 +257,11 @@ export class AdminPetController {
       if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
       if (dto.sortOrder !== undefined) updateData.sortOrder = dto.sortOrder;
 
-      await this.petBannerRepository.update(id, updateData);
-      return await this.petBannerRepository.findOne({ where: { id } });
+  await this.petBannerRepository.update(id, updateData);
+  const saved = await this.petBannerRepository.findOne({ where: { id } });
+  // Log the saved banner for debugging persistence issues
+  console.debug('Admin:updateBanner saved banner:', saved);
+  return saved;
     } catch (error) {
       console.error('Error updating banner:', error);
       throw new BadRequestException('Failed to update banner');

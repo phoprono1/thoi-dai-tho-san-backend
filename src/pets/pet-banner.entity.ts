@@ -44,6 +44,15 @@ export class PetBanner {
   @Column()
   costPerPull: number; // Currency cost per single pull
 
+  // Optional: use an item (ticket) as cost instead of gold. If set, each pull
+  // consumes `costItemQuantity` of the specified item. If costPerPull is 0
+  // and costItemId is set, the banner requires tickets (cannot be paid by gold).
+  @Column({ name: 'cost_item_id', type: 'int', nullable: true })
+  costItemId?: number | null;
+
+  @Column({ name: 'cost_item_quantity', type: 'int', default: 1 })
+  costItemQuantity: number;
+
   @Column()
   guaranteedRarity: number; // Guaranteed rarity after X pulls
 
@@ -154,10 +163,17 @@ export class PetBanner {
   }
 
   getFormattedCost(): string {
+    if (this.costItemId) {
+      return `${this.costItemQuantity} vé`; // display ticket cost
+    }
     if (this.costPerPull >= 1000) {
       return `${(this.costPerPull / 1000).toFixed(1)}K`;
     }
     return this.costPerPull.toString();
+  }
+
+  usesItemCost(): boolean {
+    return !!this.costItemId;
   }
 
   validateDropRates(): boolean {

@@ -429,6 +429,104 @@ export class PetGachaService {
       }
       console.log('✅ User found:', user.username, 'Gold:', user.gold);
 
+      // If banner uses an item as cost (ticket), perform the entire flow in a
+      // transaction: verify & consume item, perform pull, update pity, record pull.
+      // Unified transactional flow: prefer tickets, allow fallback to gold unless banner forces tickets (costPerPull === 0)
+      return await this.petGachaPullRepository.manager.transaction(
+        async (manager) => {
+          // Re-fetch user within transaction
+          const txUser = await manager
+            .getRepository(User)
+            .findOne({ where: { id: userId } });
+          if (!txUser) throw new NotFoundException('User not found');
+
+          // Load or create pity row within transaction
+          let pity = await manager
+            .getRepository(UserPetBannerPity)
+            .findOne({ where: { userId, bannerId } });
+          if (!pity) {
+            pity = manager.getRepository(UserPetBannerPity).create({
+              userId,
+              bannerId,
+              pullCount: 0,
+              totalPulls: 0,
+              lastPullDate: new Date(),
+              thresholdCounters: null,
+            });
+            await manager.getRepository(UserPetBannerPity).save(pity);
+          }
+
+          // Determine payment method: try tickets first if configured
+          const requiredQty = banner.costItemQuantity || 1;
+          let useTicket = false;
+          let uiRow: { id: number; quantity: number } | null = null;
+          if (banner.costItemId) {
+            const rawRes: unknown = await manager.query(
+              'SELECT id, quantity FROM user_item WHERE "userId" = $1 AND "itemId" = $2 FOR UPDATE',
+              [userId, banner.costItemId],
+            );
+            const res = Array.isArray(rawRes)
+              ? (rawRes as Array<{ id: number; quantity: number }>)
+              : [];
+            uiRow = res.length > 0 ? res[0] : null;
+            if (
+              uiRow &&
+              typeof uiRow.quantity === 'number' &&
+              uiRow.quantity >= requiredQty
+            ) {
+              useTicket = true;
+            }
+          }
+
+          // If not using ticket and banner requires tickets only, reject
+          if (!useTicket && banner.costPerPull === 0 && banner.costItemId) {
+            throw new BadRequestException('Insufficient tickets for pull');
+          }
+
+          // If not using ticket, ensure user has enough gold (fallback)
+          if (!useTicket) {
+            if (txUser.gold < banner.costPerPull)
+              throw new BadRequestException('Insufficient gold for pull');
+            // Deduct gold now
+            txUser.gold -= banner.costPerPull;
+            await manager.getRepository(User).save(txUser);
+          } else {
+            // consume ticket (uiRow guarded by useTicket condition)
+            if (uiRow && uiRow.quantity === requiredQty) {
+              await manager.query('DELETE FROM user_item WHERE id = $1', [
+                uiRow.id,
+              ]);
+            } else if (uiRow) {
+              await manager.query(
+                'UPDATE user_item SET quantity = quantity - $1 WHERE id = $2',
+                [requiredQty, uiRow.id],
+              );
+            }
+          }
+
+          // perform pull
+          const result = await this.performSinglePullInternal(
+            userId,
+            banner,
+            pity,
+            false,
+            manager,
+          );
+
+          // Update pity and record pull using same manager
+          await this.updatePity(
+            pity,
+            result.wasGuaranteed,
+            result.triggeredGuaranteedRarity ?? null,
+            manager,
+          );
+          await this.recordPull(userId, banner, result, 'single', manager);
+
+          return result;
+        },
+      );
+
+      // Legacy gold-based flow
       // Check if user has enough currency
       if (user.gold < banner.costPerPull) {
         throw new BadRequestException('Insufficient gold for pull');
@@ -493,6 +591,65 @@ export class PetGachaService {
         .findOne({ where: { id: userId } });
       if (!txUser) throw new NotFoundException('User not found');
 
+      // If banner uses item cost, consume available tickets up-front and
+      // fallback to gold for remaining pulls if allowed (banner.costPerPull > 0).
+      let ticketsConsumed = 0;
+      if (banner.costItemId) {
+        const totalRequired = (banner.costItemQuantity || 1) * 10;
+        const rawRes2: unknown = await manager.query(
+          'SELECT id, quantity FROM user_item WHERE "userId" = $1 AND "itemId" = $2 FOR UPDATE',
+          [userId, banner.costItemId],
+        );
+        const res2 = Array.isArray(rawRes2)
+          ? (rawRes2 as Array<{ id: number; quantity: number }>)
+          : [];
+        const uiRow = res2.length > 0 ? res2[0] : null;
+        if (uiRow && typeof uiRow.quantity === 'number' && uiRow.quantity > 0) {
+          const perPullQty = banner.costItemQuantity || 1;
+          // Only consume full multiples that can cover whole pulls.
+          const maxFullMultiples = Math.floor(uiRow.quantity / perPullQty);
+          const maxFullConsumable = maxFullMultiples * perPullQty;
+          const canTake = Math.min(maxFullConsumable, totalRequired);
+          ticketsConsumed = canTake;
+
+          // Only perform a DB update/delete if we're actually consuming something
+          if (canTake > 0) {
+            if (uiRow.quantity === canTake) {
+              await manager.query('DELETE FROM user_item WHERE id = $1', [
+                uiRow.id,
+              ]);
+            } else {
+              await manager.query(
+                'UPDATE user_item SET quantity = quantity - $1 WHERE id = $2',
+                [canTake, uiRow.id],
+              );
+            }
+          }
+        }
+
+        // If banner requires tickets only and we didn't consume enough, fail
+        if (ticketsConsumed < totalRequired && banner.costPerPull === 0) {
+          throw new BadRequestException('Insufficient tickets for 10x pull');
+        }
+      }
+
+      // After ticket consumption, if there are remaining pulls to pay with gold, deduct here
+      const pullsCoveredByTickets = Math.floor(
+        (ticketsConsumed || 0) / (banner.costItemQuantity || 1),
+      );
+      const remainingPulls = 10 - pullsCoveredByTickets;
+      if (remainingPulls > 0) {
+        const goldNeeded = remainingPulls * banner.costPerPull;
+        if (txUser.gold < goldNeeded) {
+          // Revert: if we already consumed tickets above, we should not leave them consumed on failure.
+          throw new BadRequestException(
+            'Insufficient funds (tickets+gold) for 10x pull',
+          );
+        }
+        txUser.gold -= goldNeeded;
+        await manager.getRepository(User).save(txUser);
+      }
+
       // Load or create pity row within transaction to avoid races
       let pity = await manager
         .getRepository(UserPetBannerPity)
@@ -528,9 +685,16 @@ export class PetGachaService {
         );
       }
 
-      // Deduct cost within transaction
-      txUser.gold -= totalCost;
-      await manager.getRepository(User).save(txUser);
+      // Deduct cost within transaction if gold-based
+      if (
+        !(
+          banner.usesItemCost() ||
+          (banner.costPerPull === 0 && banner.costItemId)
+        )
+      ) {
+        txUser.gold -= totalCost;
+        await manager.getRepository(User).save(txUser);
+      }
 
       // Record pulls within transaction
       for (const r of pulls) {
