@@ -45,12 +45,23 @@ export class PetController {
     @Query('includeInactive') includeInactive?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('element') element?: string,
+    @Query('minRarity') minRarity?: string,
+    @Query('maxRarity') maxRarity?: string,
+    @Query('sort') sort?: string,
   ) {
+    const opts: any = {};
+    if (element) opts.element = element;
+    if (minRarity) opts.minRarity = parseInt(minRarity, 10);
+    if (maxRarity) opts.maxRarity = parseInt(maxRarity, 10);
+    if (sort) opts.sort = sort;
+
     return this.petService.getUserPets(
       user.id,
       includeInactive === 'true',
       limit ? parseInt(limit, 10) : undefined,
       offset ? parseInt(offset, 10) : undefined,
+      opts,
     );
   }
 
@@ -176,6 +187,13 @@ export class PetController {
   @Get('my-stats')
   async getMyPetStats(@CurrentUser() user: User) {
     return this.petService.getUserPetStats(user.id);
+  }
+
+  // Debug: return count of user's pets (include inactive)
+  @Get('debug/count')
+  async getMyPetCount(@CurrentUser() user: User) {
+    const pets = await this.petService.getUserPets(user.id, true);
+    return { count: pets.length };
   }
 
   // Gacha System

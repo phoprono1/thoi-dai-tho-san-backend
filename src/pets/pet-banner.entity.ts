@@ -50,6 +50,11 @@ export class PetBanner {
   @Column()
   guaranteedPullCount: number; // How many pulls for guaranteed
 
+  // New: support multiple configurable pity thresholds (jsonb)
+  // Example: [{ "rarity": 4, "pullCount": 10 }, { "rarity": 5, "pullCount": 20 }]
+  @Column({ type: 'jsonb', nullable: true })
+  pityThresholds: { rarity: number; pullCount: number }[] | null;
+
   @Column({ type: 'jsonb' })
   featuredPets: FeaturedPet[];
 
@@ -161,5 +166,19 @@ export class PetBanner {
       0,
     );
     return Math.abs(total - 1.0) < 0.001; // Allow for floating point precision
+  }
+
+  // Return configured pity thresholds, falling back to the legacy single guaranteed settings
+  getPityThresholds(): { rarity: number; pullCount: number }[] {
+    if (this.pityThresholds && Array.isArray(this.pityThresholds)) {
+      return this.pityThresholds.slice().sort((a, b) => a.rarity - b.rarity);
+    }
+    // fallback to legacy single threshold
+    return [
+      {
+        rarity: this.guaranteedRarity,
+        pullCount: this.guaranteedPullCount,
+      },
+    ];
   }
 }

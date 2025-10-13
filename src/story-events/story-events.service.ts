@@ -35,15 +35,15 @@ export class StoryEventsService {
   ) {}
 
   async createEvent(data: Partial<StoryEvent> | any) {
-    const e = this.storyEventRepo.create(data as any);
+    const e = this.storyEventRepo.create(data);
     const savedRaw = await this.storyEventRepo.save(e as any);
     const saved = savedRaw as StoryEvent;
     // map/normalize date strings if present
-    if ((data as any)?.eventStart && typeof (data as any).eventStart === 'string') {
-      (data as any).eventStart = new Date((data as any).eventStart);
+    if (data?.eventStart && typeof data.eventStart === 'string') {
+      data.eventStart = new Date(data.eventStart);
     }
-    if ((data as any)?.eventEnd && typeof (data as any).eventEnd === 'string') {
-      (data as any).eventEnd = new Date((data as any).eventEnd);
+    if (data?.eventEnd && typeof data.eventEnd === 'string') {
+      data.eventEnd = new Date(data.eventEnd);
     }
     // create global progress row if enabled
     if (saved && (saved as any).globalEnabled) {
@@ -71,14 +71,14 @@ export class StoryEventsService {
 
   async updateEvent(id: number, data: Partial<StoryEvent> | any) {
     // normalize date strings
-    if ((data as any)?.eventStart && typeof (data as any).eventStart === 'string') {
-      (data as any).eventStart = new Date((data as any).eventStart);
+    if (data?.eventStart && typeof data.eventStart === 'string') {
+      data.eventStart = new Date(data.eventStart);
     }
-    if ((data as any)?.eventEnd && typeof (data as any).eventEnd === 'string') {
-      (data as any).eventEnd = new Date((data as any).eventEnd);
+    if (data?.eventEnd && typeof data.eventEnd === 'string') {
+      data.eventEnd = new Date(data.eventEnd);
     }
 
-    await this.storyEventRepo.update(id, data as any);
+    await this.storyEventRepo.update(id, data);
     return this.getEvent(id);
   }
 
@@ -107,13 +107,13 @@ export class StoryEventsService {
         storyEventId: eventId,
         userId,
       } as any) as any;
-      uc = await this.userContribRepo.save(uc as any);
+      uc = await this.userContribRepo.save(uc);
     }
 
     uc.dungeonClears = (uc.dungeonClears || 0) + count;
     uc.totalScore = (uc.totalScore || 0) + count; // simplistic scoring
     uc.lastContributionAt = new Date();
-    await this.userContribRepo.save(uc as any);
+    await this.userContribRepo.save(uc);
 
     // update global
     try {
@@ -165,7 +165,7 @@ export class StoryEventsService {
             storyEventId: ev.id,
             userId,
           } as any) as any;
-          uc = await this.userContribRepo.save(uc as any);
+          uc = await this.userContribRepo.save(uc);
         }
 
         let contributed = false;
@@ -225,7 +225,7 @@ export class StoryEventsService {
             (uc.itemsContributed || 0) * 5;
           uc.totalScore = score;
           uc.lastContributionAt = new Date();
-          await this.userContribRepo.save(uc as any);
+          await this.userContribRepo.save(uc);
         }
 
         // Insert tracking row to avoid reprocessing this combatResult for this event+user
@@ -401,7 +401,7 @@ export class StoryEventsService {
     const ev = await this.storyEventRepo.findOne({ where: { id: eventId } });
     const eventCfg = (ev && (ev as any).rewardConfig) || {};
     // Merged spec: start from eventCfg then overlay rewardSpec
-    const mergedSpec = { ...(eventCfg || {}), ...(rewardSpec as any) } as any;
+    const mergedSpec = { ...(eventCfg || {}), ...(rewardSpec as any) };
 
     // Fetch total score
     const global = await this.dataSource.manager.query(
@@ -456,7 +456,7 @@ export class StoryEventsService {
           raw: (r.totalScore || 0) * (gp / totalScore),
         }));
         const base = rawShares.map((s) => Math.floor(s.raw));
-        let allocated = base.reduce((a, b) => a + b, 0);
+        const allocated = base.reduce((a, b) => a + b, 0);
         // distribute remainder by fractional parts
         const remainders = rawShares.map((s, idx) => ({
           userId: s.userId,
@@ -488,7 +488,7 @@ export class StoryEventsService {
           raw: (r.totalScore || 0) * (poolQty / totalScore),
         }));
         const base = rawShares.map((s) => Math.floor(s.raw));
-        let allocated = base.reduce((a, b) => a + b, 0);
+        const allocated = base.reduce((a, b) => a + b, 0);
         const remainders = rawShares.map((s, idx) => ({
           userId: s.userId,
           frac: s.raw - Math.floor(s.raw),

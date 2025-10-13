@@ -8,7 +8,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, EntityManager } from 'typeorm';
 import { PetDefinition } from './pet-definition.entity';
 import { UserPet } from './user-pet.entity';
 import { PetEvolution } from './pet-evolution.entity';
@@ -113,6 +113,12 @@ export class PetService {
     includeInactive = false,
     limit?: number,
     offset?: number,
+    options?: {
+      element?: string;
+      minRarity?: number;
+      maxRarity?: number;
+      sort?: 'rarity_desc' | 'rarity_asc' | 'newest' | 'oldest';
+    },
   ): Promise<UserPet[]> {
     try {
       console.log(
@@ -139,17 +145,51 @@ export class PetService {
         }
       }
 
-      // Build optimized query with pagination
+      // Build optimized query with pagination and filters
       const query = this.userPetRepository
         .createQueryBuilder('userPet')
         .leftJoinAndSelect('userPet.petDefinition', 'petDefinition')
-        .where('userPet.userId = :userId', { userId })
-        .orderBy('userPet.isActive', 'DESC') // Active pet first
-        .addOrderBy('userPet.level', 'DESC')
-        .addOrderBy('userPet.obtainedAt', 'DESC');
+        .where('userPet.userId = :userId', { userId });
 
+      // Apply inactive filter
       if (!includeInactive) {
         query.andWhere('userPet.isActive = :isActive', { isActive: true });
+      }
+
+      // Apply element filter
+      if (options?.element) {
+        query.andWhere('petDefinition.element = :element', {
+          element: options.element,
+        });
+      }
+
+      // Apply rarity filters
+      if (options?.minRarity !== undefined) {
+        query.andWhere('petDefinition.rarity >= :minRarity', {
+          minRarity: options.minRarity,
+        });
+      }
+      if (options?.maxRarity !== undefined) {
+        query.andWhere('petDefinition.rarity <= :maxRarity', {
+          maxRarity: options.maxRarity,
+        });
+      }
+
+      // Apply sorting
+      if (options?.sort === 'rarity_desc') {
+        query.orderBy('petDefinition.rarity', 'DESC');
+      } else if (options?.sort === 'rarity_asc') {
+        query.orderBy('petDefinition.rarity', 'ASC');
+      } else if (options?.sort === 'newest') {
+        query.orderBy('userPet.obtainedAt', 'DESC');
+      } else if (options?.sort === 'oldest') {
+        query.orderBy('userPet.obtainedAt', 'ASC');
+      } else {
+        // Default ordering: active first, then level, then newest
+        query
+          .orderBy('userPet.isActive', 'DESC')
+          .addOrderBy('userPet.level', 'DESC')
+          .addOrderBy('userPet.obtainedAt', 'DESC');
       }
 
       if (limit) {
@@ -826,6 +866,7 @@ export class PetService {
   async createUserPet(
     userId: number,
     petDefinitionId: number,
+    manager?: EntityManager,
   ): Promise<UserPet> {
     const petDefinition = await this.getPetDefinitionById(petDefinitionId);
 
@@ -843,7 +884,26 @@ export class PetService {
     userPet.friendship = 0;
 
     userPet.updateCurrentStats();
-    return this.userPetRepository.save(userPet);
+
+    try {
+      console.log(
+        `[createUserPet] userId=${userId} petDefinitionId=${petDefinitionId} creating`,
+      );
+      const repo = manager
+        ? manager.getRepository(UserPet)
+        : this.userPetRepository;
+      const saved = await repo.save(userPet);
+      console.log(
+        `[createUserPet] userId=${userId} petDefinitionId=${petDefinitionId} saved userPetId=${saved.id}`,
+      );
+      return saved;
+    } catch (error) {
+      console.error(
+        `[createUserPet] ERROR saving userPet userId=${userId} petDefinitionId=${petDefinitionId}`,
+        error,
+      );
+      throw error;
+    }
   }
 
   async releasePet(petId: number, userId: number): Promise<void> {

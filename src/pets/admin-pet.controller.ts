@@ -60,6 +60,7 @@ export interface CreateBannerDto {
     rarity4: number;
     rarity5: number;
   };
+  pityThresholds?: Array<{ rarity: number; pullCount: number }>;
   startDate: string;
   endDate: string;
   bannerImage?: string;
@@ -182,6 +183,15 @@ export class AdminPetController {
   @Post('banners')
   async createBanner(@Body() dto: CreateBannerDto) {
     try {
+      // Normalize pity thresholds if provided
+      const pity =
+        dto.pityThresholds && dto.pityThresholds.length > 0
+          ? dto.pityThresholds.map((t) => ({
+              rarity: Number(t.rarity),
+              pullCount: Math.max(1, Number(t.pullCount) || 1),
+            }))
+          : null;
+
       const banner = this.petBannerRepository.create({
         name: dto.name,
         description: dto.description,
@@ -189,6 +199,7 @@ export class AdminPetController {
         costPerPull: dto.costPerPull,
         guaranteedRarity: dto.guaranteedRarity,
         guaranteedPullCount: dto.guaranteedPullCount,
+        pityThresholds: pity,
         featuredPets: dto.featuredPets,
         dropRates: dto.dropRates,
         startDate: new Date(dto.startDate),
@@ -220,6 +231,12 @@ export class AdminPetController {
         updateData.guaranteedRarity = dto.guaranteedRarity;
       if (dto.guaranteedPullCount)
         updateData.guaranteedPullCount = dto.guaranteedPullCount;
+      if (dto.pityThresholds) {
+        updateData.pityThresholds = dto.pityThresholds.map((t) => ({
+          rarity: Number(t.rarity),
+          pullCount: Math.max(1, Number(t.pullCount) || 1),
+        }));
+      }
       if (dto.featuredPets) updateData.featuredPets = dto.featuredPets;
       if (dto.dropRates) updateData.dropRates = dto.dropRates;
       if (dto.startDate) updateData.startDate = new Date(dto.startDate);
@@ -316,7 +333,7 @@ export class AdminPetController {
         this.petEquipmentRepository.manager.connection.createQueryRunner();
 
       // Get table schema
-      const tableInfo: any = await queryRunner.query(`
+      const tableInfo = await queryRunner.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
         WHERE table_name = 'pet_equipment'
@@ -324,12 +341,12 @@ export class AdminPetController {
       `);
 
       // Try to get sample data if any exists
-      let sampleData: any = null;
+      let sampleData: Record<string, unknown> | null = null;
       try {
         const rawQuery: any = await queryRunner.query(
           'SELECT * FROM pet_equipment LIMIT 1',
         );
-        sampleData = rawQuery[0] || null;
+        sampleData = (rawQuery && rawQuery[0]) || null;
       } catch (err: any) {
         sampleData = {
           error: 'No data or query failed',
@@ -338,7 +355,7 @@ export class AdminPetController {
       }
 
       // Get all pet table schemas
-      const allPetTables: any = await queryRunner.query(`
+      const allPetTables = await queryRunner.query(`
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_name LIKE 'pet_%' 
@@ -350,7 +367,9 @@ export class AdminPetController {
       return {
         petEquipmentSchema: tableInfo,
         sampleData,
-        allPetTables: allPetTables.map((t: any) => t.table_name),
+        allPetTables: Array.isArray(allPetTables)
+          ? allPetTables.map((t: { table_name: string }) => t.table_name)
+          : [],
         entityFields: {
           expected: [
             'id',

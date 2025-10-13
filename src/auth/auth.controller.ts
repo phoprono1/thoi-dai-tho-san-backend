@@ -56,7 +56,7 @@ export class AuthController {
   })
   async login(@Req() req: Request) {
     const loginIp = this.getIP(req);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+
     return this.authService.login(req.user, loginIp);
   }
   @UseGuards(JwtAuthGuard)
@@ -95,7 +95,7 @@ export class AuthController {
     description: 'Username đã tồn tại hoặc dữ liệu không hợp lệ',
   })
   async register(@Req() req: Request) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const { username, password, deviceFingerprint } = req.body;
     const registrationIp = this.getIP(req);
 

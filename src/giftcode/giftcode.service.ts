@@ -82,4 +82,25 @@ export class GiftCodeService {
   async findAll() {
     return this.giftRepo.find({ order: { createdAt: 'DESC' } });
   }
+
+  async deactivate(id: number) {
+    const g = await this.giftRepo.findOne({ where: { id } });
+    if (!g) throw new NotFoundException('Gift code not found');
+    g.isActive = false;
+    return this.giftRepo.save(g);
+  }
+
+  /**
+   * Permanently remove a giftcode. This does not remove historical usages but
+   * will prevent future redeems. Run inside transaction to be safe.
+   */
+  async remove(id: number) {
+    return this.dataSource.transaction(async (manager) => {
+      const g = await manager.findOne(GiftCode, { where: { id } });
+      if (!g) throw new NotFoundException('Gift code not found');
+      // Optionally, you could also archive or mark usages. For now delete the giftcode row.
+      await manager.delete(GiftCode, { id });
+      return { success: true };
+    });
+  }
 }

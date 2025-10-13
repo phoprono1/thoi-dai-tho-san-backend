@@ -57,7 +57,7 @@ export class QuestService {
       // allows admins to add chained quests retroactively without
       // requiring players to re-trigger completion events.
       try {
-        const prereqs = questData.dependencies.prerequisiteQuests as number[];
+        const prereqs = questData.dependencies.prerequisiteQuests;
         if (Array.isArray(prereqs) && prereqs.length > 0) {
           // Run the assignment in background (non-blocking) so admin API
           // remains responsive. We don't await the promise here on purpose.

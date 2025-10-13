@@ -39,12 +39,15 @@ export class StoryEventsController {
     @Request() req: { user?: { isAdmin?: boolean } },
   ) {
     if (!req?.user?.isAdmin) throw new ForbiddenException('Admin only');
-  return await this.svc.updateEvent(id, body as any);
+    return await this.svc.updateEvent(id, body as any);
   }
 
   @UseGuards(JwtAuthGuard)
   @Delete('admin/:id')
-  async deleteAdmin(@Param('id', ParseIntPipe) id: number, @Request() req: { user?: { isAdmin?: boolean } }) {
+  async deleteAdmin(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: { user?: { isAdmin?: boolean } },
+  ) {
     if (!req?.user?.isAdmin) throw new ForbiddenException('Admin only');
     return await this.svc.deleteEvent(id);
   }

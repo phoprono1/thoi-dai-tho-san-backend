@@ -4,11 +4,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { PetBanner } from './pet-banner.entity';
+import { Repository, EntityManager } from 'typeorm';
+import { PetBanner, FeaturedPet } from './pet-banner.entity';
 import { PetGachaPull } from './pet-gacha-pull.entity';
 import { UserPetBannerPity } from './user-pet-banner-pity.entity';
 import { PetDefinition } from './pet-definition.entity';
+import { UserPet } from './user-pet.entity';
 import { User } from '../users/user.entity';
 import { PetService } from './pet.service';
 
@@ -28,6 +29,8 @@ export interface PullResult {
     rarity: number;
     imageUrl?: string;
   };
+  // If the pull was guaranteed due to a configured threshold, this is the rarity of that threshold
+  triggeredGuaranteedRarity?: number | null;
 }
 
 export interface MultiPullResult {
@@ -91,7 +94,7 @@ export class PetGachaService {
     }
 
     // Extract petIds from featuredPets array
-    const petIds = banner.featuredPets.map((fp: any) => fp.petId);
+    const petIds = banner.featuredPets.map((fp: { petId: string }) => fp.petId);
 
     // Fetch pet definitions
     const pets = await this.petDefinitionRepository
@@ -128,14 +131,27 @@ export class PetGachaService {
   async updatePity(
     pity: UserPetBannerPity,
     wasGuaranteed: boolean,
+    triggeredRarity?: number | null,
+    manager?: EntityManager,
   ): Promise<void> {
+    // Increment common counters
     pity.addPull();
 
     if (wasGuaranteed) {
-      pity.resetPity();
+      if (triggeredRarity) {
+        // Reset only the specific threshold counter
+        pity.resetThreshold(triggeredRarity);
+      } else {
+        // Legacy behavior: reset all counters
+        pity.resetPity();
+      }
     }
 
-    await this.userPetBannerPityRepository.save(pity);
+    if (manager) {
+      await manager.getRepository(UserPetBannerPity).save(pity);
+    } else {
+      await this.userPetBannerPityRepository.save(pity);
+    }
   }
 
   // Gacha Logic
@@ -158,7 +174,7 @@ export class PetGachaService {
 
     // Get available pets of this rarity from the database
     const availablePets = await this.petDefinitionRepository.find({
-      where: { rarity: rarity as any },
+      where: { rarity },
     });
 
     if (availablePets.length === 0) {
@@ -180,24 +196,63 @@ export class PetGachaService {
     banner: PetBanner,
     pity: UserPetBannerPity,
     isGuaranteed = false,
+    manager?: EntityManager,
   ): Promise<PullResult> {
     let rarity: number = 1;
     let wasGuaranteed = false;
 
-    // Check if guaranteed pull
-    if (isGuaranteed || pity.isGuaranteedNext(banner)) {
-      rarity = banner.guaranteedRarity;
-      wasGuaranteed = true;
-    } else {
-      // Normal pull logic
-      const random = Math.random();
-      let cumulativeRate = 0;
+    // Check if guaranteed pull using multi-threshold logic
+    const thresholds = banner.getPityThresholds();
 
-      for (let r = 5; r >= 1; r--) {
-        cumulativeRate += banner.getRarityRate(r);
-        if (random <= cumulativeRate) {
-          rarity = r;
-          break;
+    // Ensure user pity has thresholdCounters initialized (backfill from legacy pullCount)
+    if (!pity.thresholdCounters) {
+      pity.thresholdCounters = {};
+    }
+    // Ensure counters exist for all configured thresholds (handles admin adding thresholds later)
+    for (const t of thresholds) {
+      const key = String(t.rarity);
+      if (!(key in pity.thresholdCounters)) {
+        pity.thresholdCounters[key] = pity.pullCount || 0;
+      }
+    }
+
+    // Prepare variable to track which threshold (if any) triggered guarantee
+    let triggeredRarity: number | null = null;
+
+    if (isGuaranteed) {
+      // external forced guarantee: choose highest configured threshold as guarantee
+      rarity =
+        thresholds[thresholds.length - 1].rarity ?? banner.guaranteedRarity;
+      wasGuaranteed = true;
+      // Treat forced guarantee as triggering that highest threshold so only it will be reset
+      triggeredRarity = rarity;
+    } else {
+      // if any threshold would be triggered by the next pull, apply the highest rarity triggered
+      const triggered: { rarity: number; pullCount: number }[] = [];
+      for (const t of thresholds) {
+        const key = String(t.rarity);
+        const current = pity.thresholdCounters[key] ?? 0;
+        if (current + 1 >= t.pullCount) triggered.push(t);
+      }
+
+      if (triggered.length > 0) {
+        // choose highest rarity among triggered thresholds
+        triggered.sort((a, b) => b.rarity - a.rarity);
+        rarity = triggered[0].rarity;
+        wasGuaranteed = true;
+        // record which threshold caused guarantee
+        triggeredRarity = triggered[0].rarity;
+      } else {
+        // Normal pull logic
+        const random = Math.random();
+        let cumulativeRate = 0;
+
+        for (let r = 5; r >= 1; r--) {
+          cumulativeRate += banner.getRarityRate(r);
+          if (random <= cumulativeRate) {
+            rarity = r;
+            break;
+          }
         }
       }
     }
@@ -266,8 +321,8 @@ export class PetGachaService {
     if (featuredPets.length > 0) {
       // Use weighted selection based on rateUpMultiplier
       const featuredPetMap = new Map<string, number>();
-      banner.featuredPets?.forEach((fp: any) => {
-        featuredPetMap.set(fp.petId, fp.rateUpMultiplier || 1);
+      banner.featuredPets?.forEach((fp: FeaturedPet) => {
+        featuredPetMap.set(fp.petId, fp.rateUpMultiplier ?? 1);
       });
 
       // Build weighted pool
@@ -315,21 +370,20 @@ export class PetGachaService {
         availablePets[Math.floor(Math.random() * availablePets.length)];
     }
 
-    // Check if user already has this pet
-    const existingPets = await this.petService.getUserPets(userId);
-    const isNew = !existingPets.some(
-      (pet) => pet.petDefinition.petId === selectedPet.petId,
-    );
-
-    // Create or get user pet
-    let userPet: any;
-    if (isNew) {
-      userPet = await this.petService.createUserPet(userId, selectedPet.id);
-    } else {
-      // Find existing user pet
-      userPet = existingPets.find(
-        (pet) => pet.petDefinition.petId === selectedPet.petId,
+    // Always create a new user pet instance for every pull (allow duplicates)
+    let userPet: UserPet | null = null;
+    try {
+      userPet = await this.petService.createUserPet(
+        userId,
+        selectedPet.id,
+        manager,
       );
+    } catch (error) {
+      console.error(
+        `[performSinglePullInternal] ERROR creating userPet userId=${userId} petDef=${selectedPet.id}`,
+        error,
+      );
+      throw error;
     }
 
     // Ensure userPet exists
@@ -342,8 +396,10 @@ export class PetGachaService {
       petDefinition: selectedPet,
       rarity,
       wasGuaranteed,
+      triggeredGuaranteedRarity:
+        typeof triggeredRarity !== 'undefined' ? triggeredRarity : null,
       wasFeatured,
-      isNew,
+      isNew: true,
       userPet: {
         id: userPet.id,
         petDefinitionId: selectedPet.id,
@@ -389,8 +445,12 @@ export class PetGachaService {
       await this.userRepository.save(user);
       console.log('✅ Gold deducted');
 
-      // Update pity
-      await this.updatePity(pity, result.wasGuaranteed);
+      // Update pity (pass triggered rarity if any)
+      await this.updatePity(
+        pity,
+        result.wasGuaranteed,
+        result.triggeredGuaranteedRarity ?? null,
+      );
       console.log('✅ Pity updated');
 
       // Record pull
@@ -423,34 +483,60 @@ export class PetGachaService {
       throw new BadRequestException('Insufficient gold for 10x pull');
     }
 
-    const pity = await this.getUserPity(userId, bannerId);
+    // Run multi-pull inside a transaction to ensure atomicity
     const pulls: PullResult[] = [];
 
-    // Perform 10 pulls
-    for (let i = 0; i < 10; i++) {
-      // Do NOT force a guaranteed high-rarity within a 10x pull.
-      // Pity/guarantee behavior should be controlled by banner.guaranteedPullCount
-      // and user-specific pity records. This respects admin settings.
-      const result = await this.performSinglePullInternal(
-        userId,
-        banner,
-        pity,
-        false,
-      );
-      pulls.push(result);
+    await this.petDefinitionRepository.manager.transaction(async (manager) => {
+      // Re-fetch user within transaction
+      const txUser = await manager
+        .getRepository(User)
+        .findOne({ where: { id: userId } });
+      if (!txUser) throw new NotFoundException('User not found');
 
-      // Update pity after each pull
-      await this.updatePity(pity, result.wasGuaranteed);
-    }
+      // Load or create pity row within transaction to avoid races
+      let pity = await manager
+        .getRepository(UserPetBannerPity)
+        .findOne({ where: { userId, bannerId } });
+      if (!pity) {
+        pity = manager.getRepository(UserPetBannerPity).create({
+          userId,
+          bannerId,
+          pullCount: 0,
+          totalPulls: 0,
+          lastPullDate: new Date(),
+          thresholdCounters: null,
+        });
+        await manager.getRepository(UserPetBannerPity).save(pity);
+      }
 
-    // Deduct cost
-    user.gold -= totalCost;
-    await this.userRepository.save(user);
+      for (let i = 0; i < 10; i++) {
+        const result = await this.performSinglePullInternal(
+          userId,
+          banner,
+          pity,
+          false,
+          manager,
+        );
+        pulls.push(result);
 
-    // Record pulls
-    for (let i = 0; i < pulls.length; i++) {
-      await this.recordPull(userId, banner, pulls[i], 'multi_10');
-    }
+        // Update pity using transaction manager and pass triggered rarity if available
+        await this.updatePity(
+          pity,
+          result.wasGuaranteed,
+          result.triggeredGuaranteedRarity ?? null,
+          manager,
+        );
+      }
+
+      // Deduct cost within transaction
+      txUser.gold -= totalCost;
+      await manager.getRepository(User).save(txUser);
+
+      // Record pulls within transaction
+      for (const r of pulls) {
+        await this.recordPull(userId, banner, r, 'multi_10', manager);
+      }
+    });
 
     const stats = {
       totalCost,
@@ -471,8 +557,12 @@ export class PetGachaService {
     banner: PetBanner,
     result: PullResult,
     pullType: 'single' | 'multi_10' | 'guaranteed',
+    manager?: EntityManager,
   ): Promise<void> {
-    const pull = this.petGachaPullRepository.create({
+    const repo = manager
+      ? manager.getRepository(PetGachaPull)
+      : this.petGachaPullRepository;
+    const pull = repo.create({
       userId,
       bannerId: banner.id,
       petObtainedId: result.petDefinition.id, // Changed from petId to petObtainedId (integer)
@@ -481,7 +571,21 @@ export class PetGachaService {
       wasFeatured: result.wasFeatured,
     });
 
-    await this.petGachaPullRepository.save(pull);
+    try {
+      console.log(
+        `[recordPull] userId=${userId} bannerId=${banner.id} petObtainedId=${result.petDefinition.id} pullType=${pullType} creating`,
+      );
+      const saved = await repo.save(pull);
+      console.log(
+        `[recordPull] userId=${userId} pullId=${saved.id} petObtainedId=${result.petDefinition.id} wasGuaranteed=${result.wasGuaranteed}`,
+      );
+    } catch (error) {
+      console.error(
+        `[recordPull] ERROR saving pull userId=${userId} bannerId=${banner.id} petObtainedId=${result.petDefinition.id}`,
+        error,
+      );
+      throw error;
+    }
   }
 
   async getUserPullHistory(
