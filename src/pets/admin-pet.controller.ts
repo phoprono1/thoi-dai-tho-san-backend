@@ -199,8 +199,16 @@ export class AdminPetController {
         description: dto.description,
         bannerType: dto.bannerType,
         costPerPull: dto.costPerPull,
-        costItemId: dto.costItemId === null ? null : (dto.costItemId !== undefined ? Number(dto.costItemId) : null),
-        costItemQuantity: dto.costItemQuantity !== undefined ? Number(dto.costItemQuantity) || 1 : 1,
+        costItemId:
+          dto.costItemId === null
+            ? null
+            : dto.costItemId !== undefined
+              ? Number(dto.costItemId)
+              : null,
+        costItemQuantity:
+          dto.costItemQuantity !== undefined
+            ? Number(dto.costItemQuantity) || 1
+            : 1,
         guaranteedRarity: dto.guaranteedRarity,
         guaranteedPullCount: dto.guaranteedPullCount,
         pityThresholds: pity,
@@ -243,7 +251,8 @@ export class AdminPetController {
         }));
       }
       if (dto.costItemId !== undefined) {
-        updateData.costItemId = dto.costItemId === null ? null : Number(dto.costItemId);
+        updateData.costItemId =
+          dto.costItemId === null ? null : Number(dto.costItemId);
       }
       if (dto.costItemQuantity !== undefined) {
         updateData.costItemQuantity = Number(dto.costItemQuantity) || 1;
@@ -257,11 +266,11 @@ export class AdminPetController {
       if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
       if (dto.sortOrder !== undefined) updateData.sortOrder = dto.sortOrder;
 
-  await this.petBannerRepository.update(id, updateData);
-  const saved = await this.petBannerRepository.findOne({ where: { id } });
-  // Log the saved banner for debugging persistence issues
-  console.debug('Admin:updateBanner saved banner:', saved);
-  return saved;
+      await this.petBannerRepository.update(id, updateData);
+      const saved = await this.petBannerRepository.findOne({ where: { id } });
+      // Log the saved banner for debugging persistence issues
+      console.debug('Admin:updateBanner saved banner:', saved);
+      return saved;
     } catch (error) {
       console.error('Error updating banner:', error);
       throw new BadRequestException('Failed to update banner');

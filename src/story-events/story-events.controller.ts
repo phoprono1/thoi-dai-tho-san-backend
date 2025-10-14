@@ -15,6 +15,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { StoryEventsService, RewardSpec } from './story-events.service';
+import { StoryEvent } from './story-event.entity';
 import { CreateStoryEventDto } from './dto/create-story-event.dto';
 import { UpdateStoryEventDto } from './dto/update-story-event.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -27,7 +28,7 @@ export class StoryEventsController {
   @UsePipes(new ValidationPipe({ transform: true }))
   async create(@Body() body: CreateStoryEventDto) {
     // validated DTO -> pass through to service
-    return this.svc.createEvent(body as any);
+    return this.svc.createEvent(body as unknown as Partial<StoryEvent>);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -39,7 +40,10 @@ export class StoryEventsController {
     @Request() req: { user?: { isAdmin?: boolean } },
   ) {
     if (!req?.user?.isAdmin) throw new ForbiddenException('Admin only');
-    return await this.svc.updateEvent(id, body as any);
+    return await this.svc.updateEvent(
+      id,
+      body as unknown as Partial<StoryEvent>,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
@@ -78,7 +82,7 @@ export class StoryEventsController {
     @Param('id', ParseIntPipe) id: number,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-  ) {
+  ): Promise<import('./story-events.service').ContribRow[]> {
     const l = Number(limit || 50);
     const o = Number(offset || 0);
     return this.svc.getTopContributors(id, l, o);

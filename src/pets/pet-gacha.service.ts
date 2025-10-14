@@ -526,36 +526,7 @@ export class PetGachaService {
         },
       );
 
-      // Legacy gold-based flow
-      // Check if user has enough currency
-      if (user.gold < banner.costPerPull) {
-        throw new BadRequestException('Insufficient gold for pull');
-      }
-
-      const pity = await this.getUserPity(userId, bannerId);
-      console.log('✅ Pity:', pity);
-
-      const result = await this.performSinglePullInternal(userId, banner, pity);
-      console.log('✅ Pull result:', result);
-
-      // Deduct cost
-      user.gold -= banner.costPerPull;
-      await this.userRepository.save(user);
-      console.log('✅ Gold deducted');
-
-      // Update pity (pass triggered rarity if any)
-      await this.updatePity(
-        pity,
-        result.wasGuaranteed,
-        result.triggeredGuaranteedRarity ?? null,
-      );
-      console.log('✅ Pity updated');
-
-      // Record pull
-      await this.recordPull(userId, banner, result, 'single');
-      console.log('✅ Pull recorded');
-
-      return result;
+      // Legacy gold-based flow removed - handled in transaction above
     } catch (error) {
       console.error('❌ Error in performSinglePull:', error);
       throw error;
@@ -575,11 +546,6 @@ export class PetGachaService {
     }
 
     const totalCost = banner.costPerPull * 10;
-
-    // Check if user has enough currency
-    if (user.gold < totalCost) {
-      throw new BadRequestException('Insufficient gold for 10x pull');
-    }
 
     // Run multi-pull inside a transaction to ensure atomicity
     const pulls: PullResult[] = [];

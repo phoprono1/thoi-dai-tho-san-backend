@@ -19,6 +19,26 @@ export type RewardSpec =
       itemsPerPoint?: { itemId: number; qtyPerPoint: number }[];
     };
 
+type QuerySumRow = { s: string | number | null };
+export type ContribRow = {
+  userId: number;
+  totalScore: number;
+  itemsContributed?: number;
+  enemyKills?: number;
+  dungeonClears?: number;
+  username?: string;
+};
+
+type MergedRewardSpec = {
+  mode?: 'pool' | 'perPoint';
+  goldPool?: number;
+  goldPerPoint?: number;
+  itemPools?: { itemId: number; qty: number }[];
+  itemsPerPoint?: { itemId: number; qtyPerPoint?: number; qty?: number }[];
+  minGold?: number;
+  minItem?: number;
+};
+
 @Injectable()
 export class StoryEventsService {
   private readonly logger = new Logger(StoryEventsService.name);
@@ -34,23 +54,29 @@ export class StoryEventsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async createEvent(data: Partial<StoryEvent> | any) {
-    const e = this.storyEventRepo.create(data);
-    const savedRaw = await this.storyEventRepo.save(e as any);
-    const saved = savedRaw as StoryEvent;
-    // map/normalize date strings if present
+  private async typedQuery<T = any>(sql: string, params?: any[]): Promise<T[]> {
+    const raw: unknown = await this.dataSource.manager.query(sql, params || []);
+    if (!Array.isArray(raw)) return [];
+    return raw as T[];
+  }
+
+  async createEvent(data: Partial<StoryEvent>) {
+    // normalize incoming date strings if present
     if (data?.eventStart && typeof data.eventStart === 'string') {
       data.eventStart = new Date(data.eventStart);
     }
     if (data?.eventEnd && typeof data.eventEnd === 'string') {
       data.eventEnd = new Date(data.eventEnd);
     }
+
+    const e = this.storyEventRepo.create(data);
+    const saved = await this.storyEventRepo.save(e);
     // create global progress row if enabled
-    if (saved && (saved as any).globalEnabled) {
+    if (saved && saved.globalEnabled) {
       try {
-        await this.globalRepo.save({ storyEventId: (saved as any).id } as any);
+        await this.globalRepo.save({ storyEventId: saved.id });
       } catch {
-        // ignore
+        // best-effort: ignore duplicate/global save failures
       }
     }
     // If eventStart was not provided, default it to createdAt so contributions
@@ -60,8 +86,8 @@ export class StoryEventsService {
         saved.eventStart = saved.createdAt;
         await this.storyEventRepo.update(saved.id, {
           eventStart: saved.createdAt,
-        } as any);
-      } catch (err) {
+        });
+      } catch {
         // ignore update failure
       }
     }
@@ -69,7 +95,7 @@ export class StoryEventsService {
     return saved;
   }
 
-  async updateEvent(id: number, data: Partial<StoryEvent> | any) {
+  async updateEvent(id: number, data: Partial<StoryEvent>) {
     // normalize date strings
     if (data?.eventStart && typeof data.eventStart === 'string') {
       data.eventStart = new Date(data.eventStart);
@@ -84,7 +110,7 @@ export class StoryEventsService {
 
   async deleteEvent(id: number) {
     // soft-delete: mark inactive
-    await this.storyEventRepo.update(id, { isActive: false } as any);
+    await this.storyEventRepo.update(id, { isActive: false });
     return { success: true };
   }
 
@@ -99,14 +125,14 @@ export class StoryEventsService {
   // Minimal contrib handler example: increment dungeon clears for a user
   async incrementDungeonClear(eventId: number, userId: number, count = 1) {
     // ensure user contrib row exists
-    let uc: any = await this.userContribRepo.findOne({
+    let uc = await this.userContribRepo.findOne({
       where: { storyEventId: eventId, userId },
     });
     if (!uc) {
       uc = this.userContribRepo.create({
         storyEventId: eventId,
         userId,
-      } as any) as any;
+      } as Partial<StoryEventUserContrib>);
       uc = await this.userContribRepo.save(uc);
     }
 
@@ -115,7 +141,7 @@ export class StoryEventsService {
     uc.lastContributionAt = new Date();
     await this.userContribRepo.save(uc);
 
-    // update global
+    // update global (best-effort)
     try {
       await this.globalRepo.query(
         `UPDATE story_event_global SET "totalDungeonClears" = "totalDungeonClears" + $1 WHERE "storyEventId" = $2`,
@@ -157,14 +183,14 @@ export class StoryEventsService {
         if (existing) continue; // already processed
 
         // Ensure a user contrib row exists
-        let uc: any = await this.userContribRepo.findOne({
+        let uc = await this.userContribRepo.findOne({
           where: { storyEventId: ev.id, userId },
         });
         if (!uc) {
           uc = this.userContribRepo.create({
             storyEventId: ev.id,
             userId,
-          } as any) as any;
+          } as Partial<StoryEventUserContrib>);
           uc = await this.userContribRepo.save(uc);
         }
 
@@ -233,7 +259,7 @@ export class StoryEventsService {
           storyEventId: ev.id,
           userId,
           combatResultId,
-        } as any);
+        } as Partial<StoryEventCombatTracking>);
       } catch (err) {
         this.logger.warn(
           `Failed to process combat for event ${ev.id} user ${userId}: ${String(err)}`,
@@ -304,7 +330,7 @@ export class StoryEventsService {
           userId,
           itemsContributed: 0,
           totalScore: 0,
-        } as any);
+        } as Partial<StoryEventUserContrib>);
         uc = await queryRunner.manager.save(uc);
       }
 
@@ -317,7 +343,7 @@ export class StoryEventsService {
         (Number(uc.itemsContributed) || 0) * 5;
       uc.totalScore = score;
       uc.lastContributionAt = new Date();
-      await queryRunner.manager.save(uc as any);
+      await queryRunner.manager.save(uc);
 
       // Update global counters if exists
       try {
@@ -354,14 +380,14 @@ export class StoryEventsService {
     // Strategy: iterate through all users (from user table) in batches and ensure a user contrib row exists.
     // For simplicity / safety we will only create rows and not recompute historical scores here.
     // A more advanced implementation would aggregate historical combat_result rows.
-    const totalUsers = await this.dataSource.manager.query(
+    const totalUsers = await this.typedQuery<{ c: string | number }>(
       'SELECT COUNT(1) as c FROM "user"',
     );
     const count = Number(totalUsers?.[0]?.c || 0);
 
     let processed = 0;
     for (let offset = 0; offset < count; offset += batchSize) {
-      const rows: Array<{ id: number }> = await this.dataSource.manager.query(
+      const rows = await this.typedQuery<{ id: number }>(
         'SELECT id FROM "user" ORDER BY id LIMIT $1 OFFSET $2',
         [batchSize, offset],
       );
@@ -385,7 +411,7 @@ export class StoryEventsService {
 
   // Leaderboard: top N contributors by totalScore
   async getTopContributors(eventId: number, limit = 50, offset = 0) {
-    const rows = await this.dataSource.manager.query(
+    const rows = await this.typedQuery<ContribRow>(
       `SELECT u."userId", u."totalScore", u."itemsContributed", u."enemyKills", u."dungeonClears", usr.username FROM story_event_user_contrib u LEFT JOIN "user" usr ON usr.id = u."userId" WHERE u."storyEventId" = $1 ORDER BY u."totalScore" DESC NULLS LAST LIMIT $2 OFFSET $3`,
       [eventId, limit, offset],
     );
@@ -399,12 +425,16 @@ export class StoryEventsService {
   ) {
     // Load event and merge per-event rewardConfig with provided rewardSpec (spec overrides event defaults)
     const ev = await this.storyEventRepo.findOne({ where: { id: eventId } });
-    const eventCfg = (ev && (ev as any).rewardConfig) || {};
+    const eventCfg = (ev && (ev.rewardConfig as MergedRewardSpec)) || {};
     // Merged spec: start from eventCfg then overlay rewardSpec
-    const mergedSpec = { ...(eventCfg || {}), ...(rewardSpec as any) };
+    const mergedSpec: MergedRewardSpec = Object.assign(
+      {},
+      eventCfg,
+      rewardSpec || {},
+    );
 
     // Fetch total score
-    const global = await this.dataSource.manager.query(
+    const global = await this.typedQuery<{ s: string | number }>(
       'SELECT SUM("totalScore") as s FROM story_event_user_contrib WHERE "storyEventId" = $1',
       [eventId],
     );
@@ -412,23 +442,28 @@ export class StoryEventsService {
     if (!totalScore || totalScore <= 0)
       return { distributed: 0, reason: 'no_score' };
 
-    const rows: Array<{ userId: number; totalScore: number }> =
-      await this.dataSource.manager.query(
-        'SELECT "userId", "totalScore" FROM story_event_user_contrib WHERE "storyEventId" = $1 AND "totalScore" > 0',
-        [eventId],
-      );
+    const rows = await this.typedQuery<{ userId: number; totalScore: number }>(
+      'SELECT "userId", "totalScore" FROM story_event_user_contrib WHERE "storyEventId" = $1 AND "totalScore" > 0',
+      [eventId],
+    );
 
     // Prepare distribution plan
     const plan: Record<
       number,
       { gold: number; items: { itemId: number; qty: number }[] }
     > = {};
-    rows.forEach((r) => (plan[r.userId] = { gold: 0, items: [] }));
+    rows.forEach((r) => {
+      plan[r.userId] = { gold: 0, items: [] };
+    });
 
     if (mergedSpec.mode === 'perPoint') {
       // Per-point simple allocation
       const gp = Number(mergedSpec.goldPerPoint || 0);
-      const itemsPer = (mergedSpec.itemsPerPoint || []) as any[];
+      const itemsPer = (mergedSpec.itemsPerPoint || []) as Array<{
+        itemId: number;
+        qtyPerPoint?: number;
+        qty?: number;
+      }>;
       for (const r of rows) {
         const uid = r.userId;
         const score = Number(r.totalScore || 0);
@@ -446,74 +481,74 @@ export class StoryEventsService {
       // Pool mode with Largest Remainder (Hamilton) rounding
       const gp = Number(mergedSpec.goldPool || 0);
       const itemPools: { itemId: number; qty: number }[] =
-        (mergedSpec.itemPools || []) as any[];
+        mergedSpec.itemPools ?? [];
 
-      // Gold allocation
+      // Gold allocation using Largest Remainder
       if (gp && gp > 0) {
-        // compute raw shares
         const rawShares = rows.map((r) => ({
           userId: r.userId,
-          raw: (r.totalScore || 0) * (gp / totalScore),
+          raw: (Number(r.totalScore) || 0) * (gp / totalScore),
         }));
-        const base = rawShares.map((s) => Math.floor(s.raw));
-        const allocated = base.reduce((a, b) => a + b, 0);
-        // distribute remainder by fractional parts
-        const remainders = rawShares.map((s, idx) => ({
+        const baseShares = new Map<number, number>();
+        for (const s of rawShares) baseShares.set(s.userId, Math.floor(s.raw));
+        const allocated = Array.from(baseShares.values()).reduce(
+          (a, b) => a + b,
+          0,
+        );
+        let remaining = Math.max(0, Math.floor(gp) - allocated);
+        const remainders = rawShares.map((s) => ({
           userId: s.userId,
           frac: s.raw - Math.floor(s.raw),
         }));
         remainders.sort((a, b) => b.frac - a.frac);
-        let remain = Math.max(0, Math.floor(gp) - allocated);
-        let i = 0;
-        while (remain > 0 && i < remainders.length) {
-          const uid = remainders[i].userId;
-          base[i] = base[i] + 1;
-          plan[uid].gold = (plan[uid].gold || 0) + base[i];
-          remain--;
-          i++;
+        let idx = 0;
+        while (remaining > 0 && idx < remainders.length) {
+          const uid = remainders[idx].userId;
+          baseShares.set(uid, (baseShares.get(uid) || 0) + 1);
+          remaining--;
+          idx++;
         }
-        // assign base for those not in remainder loop
-        for (let j = 0; j < rawShares.length; j++) {
-          const uid = rawShares[j].userId;
-          if (!plan[uid].gold) plan[uid].gold = base[j];
+        // assign baseShares into plan
+        for (const [uid, val] of baseShares.entries()) {
+          plan[uid].gold = (plan[uid].gold || 0) + val;
         }
       }
 
-      // Items allocation via same Largest Remainder per item pool
+      // Items allocation via Largest Remainder per pool
       for (const pool of itemPools) {
         const poolQty = pool.qty || 0;
         if (!poolQty || poolQty <= 0) continue;
         const rawShares = rows.map((r) => ({
           userId: r.userId,
-          raw: (r.totalScore || 0) * (poolQty / totalScore),
+          raw: (Number(r.totalScore) || 0) * (poolQty / totalScore),
         }));
-        const base = rawShares.map((s) => Math.floor(s.raw));
-        const allocated = base.reduce((a, b) => a + b, 0);
-        const remainders = rawShares.map((s, idx) => ({
+        const baseShares = new Map<number, number>();
+        for (const s of rawShares) baseShares.set(s.userId, Math.floor(s.raw));
+        const allocated = Array.from(baseShares.values()).reduce(
+          (a, b) => a + b,
+          0,
+        );
+        let remaining = Math.max(0, Math.floor(poolQty) - allocated);
+        const remainders = rawShares.map((s) => ({
           userId: s.userId,
           frac: s.raw - Math.floor(s.raw),
         }));
         remainders.sort((a, b) => b.frac - a.frac);
-        let remain = Math.max(0, Math.floor(poolQty) - allocated);
-        let k = 0;
-        while (remain > 0 && k < remainders.length) {
-          const uid = remainders[k].userId;
-          base[k] = base[k] + 1;
-          if (!plan[uid].items) plan[uid].items = [];
-          plan[uid].items.push({ itemId: pool.itemId, qty: base[k] });
-          remain--;
-          k++;
+        let idx2 = 0;
+        while (remaining > 0 && idx2 < remainders.length) {
+          const uid = remainders[idx2].userId;
+          baseShares.set(uid, (baseShares.get(uid) || 0) + 1);
+          remaining--;
+          idx2++;
         }
-        for (let j = 0; j < rawShares.length; j++) {
-          const uid = rawShares[j].userId;
-          const qty = base[j];
-          if (qty > 0) {
-            if (!plan[uid].items) plan[uid].items = [];
-            // ensure sums (if already pushed via remainder loop)
-            const found = plan[uid].items.find((x) => x.itemId === pool.itemId);
-            if (found) found.qty = (found.qty || 0) + qty;
-            else plan[uid].items.push({ itemId: pool.itemId, qty });
-          }
+
+        // assign item quantities into plan
+        for (const [uid, val] of baseShares.entries()) {
+          if (val <= 0) continue;
+          if (!plan[uid].items) plan[uid].items = [];
+          const found = plan[uid].items.find((x) => x.itemId === pool.itemId);
+          if (found) found.qty = (found.qty || 0) + val;
+          else plan[uid].items.push({ itemId: pool.itemId, qty: val });
         }
       }
     }
@@ -532,9 +567,9 @@ export class StoryEventsService {
       let distributedCount = 0;
       const perUserSummary: any[] = [];
 
-      for (const uidStr of Object.keys(plan)) {
-        const uid = Number(uidStr);
-        const entry = plan[uid];
+      for (const r of rows) {
+        const uid = r.userId;
+        const entry = plan[uid] || { gold: 0, items: [] };
         const toGold = Math.max(0, Math.floor(entry.gold || 0));
         if (toGold >= minGold) {
           await queryRunner.manager.query(
