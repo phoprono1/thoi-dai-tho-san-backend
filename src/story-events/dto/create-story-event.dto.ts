@@ -9,7 +9,6 @@ import {
   IsNumber,
   Min,
   IsArray,
-  ArrayNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -69,6 +68,75 @@ class RewardConfigDto {
   minItem?: number;
 }
 
+class DungeonReqDto {
+  @IsNumber()
+  dungeonId: number;
+
+  @IsNumber()
+  @Min(1)
+  count: number;
+}
+
+class EnemyReqDto {
+  @IsString()
+  enemyType: string;
+
+  @IsNumber()
+  @Min(1)
+  count: number;
+}
+
+class ItemReqDto {
+  @IsNumber()
+  itemId: number;
+
+  @IsNumber()
+  @Min(1)
+  quantity: number;
+}
+
+class RequirementsDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DungeonReqDto)
+  completeDungeons?: DungeonReqDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EnemyReqDto)
+  killEnemies?: EnemyReqDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemReqDto)
+  collectItems?: ItemReqDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  defeatBoss?: boolean;
+}
+
+class ScoringWeightsDto {
+  @IsOptional()
+  @IsNumber()
+  dungeonClear?: number;
+
+  @IsOptional()
+  @IsNumber()
+  enemyKill?: number;
+
+  @IsOptional()
+  @IsNumber()
+  itemDonate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  bossDefeat?: number;
+}
+
 export class CreateStoryEventDto {
   @IsString()
   title: string;
@@ -107,6 +175,18 @@ export class CreateStoryEventDto {
   @ValidateNested()
   @Type(() => RewardConfigDto)
   rewardConfig?: RewardConfigDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RequirementsDto)
+  requirements?: RequirementsDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ScoringWeightsDto)
+  scoringWeights?: ScoringWeightsDto;
 
   @IsOptional()
   @IsBoolean()

@@ -581,6 +581,62 @@ export class CombatResultsService {
 
         await this.applyRewards(user, rewardForUser);
       }
+
+      // Inform story-events system about this combat so event progress (dungeon clears, enemy kills, item contributions) is updated
+      try {
+        // Compute aggregate enemyKills for this combat (group by enemy name)
+        const defeatedEnemies = (internalEnemies || []).filter((e) =>
+          typeof e.hp === 'number' ? e.hp <= 0 : false,
+        );
+        const enemyTypeCount = new Map<string, number>();
+        for (const enemy of defeatedEnemies) {
+          const enemyType = String(enemy.name || '').toLowerCase();
+          enemyTypeCount.set(
+            enemyType,
+            (enemyTypeCount.get(enemyType) || 0) + 1,
+          );
+        }
+        const enemyKills = Array.from(enemyTypeCount.entries()).map(
+          ([enemyType, count]) => ({ enemyType, count }),
+        );
+
+        for (let i = 0; i < users.length; i++) {
+          const user = users[i];
+          const perUser =
+            perUserCombined && perUserCombined[i]
+              ? perUserCombined[i]
+              : { items: [] };
+          const collectedItems = Array.isArray(perUser.items)
+            ? perUser.items.map((it: any) => ({
+                itemId: Number(it.itemId),
+                quantity: Number(it.quantity || 0),
+              }))
+            : [];
+          try {
+            await this.storyEventsService.processCombatForUser(
+              user.id,
+              (savedCombat as any)?.id,
+              {
+                dungeonId: dungeon?.id ?? null,
+                enemyKills,
+                collectedItems,
+                bossDefeated: false,
+              },
+            );
+          } catch (e) {
+            // non-fatal: log and continue
+            console.warn(
+              'Failed to process story events for user after dungeon combat:',
+              e,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          'Failed to compute/process story event updates after dungeon combat:',
+          e,
+        );
+      }
     }
 
     // Update user HP and Mana after combat

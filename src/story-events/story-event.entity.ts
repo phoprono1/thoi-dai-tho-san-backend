@@ -45,6 +45,12 @@ export class StoryEvent {
   globalTarget?: number;
 
   @Column({ type: 'jsonb', nullable: true })
+  requirements?: any;
+
+  @Column({ name: 'scoring_weights', type: 'jsonb', nullable: true })
+  scoringWeights?: any;
+
+  @Column({ type: 'jsonb', nullable: true })
   rewardConfig?: any;
 
   @Column({ type: 'integer', nullable: true })

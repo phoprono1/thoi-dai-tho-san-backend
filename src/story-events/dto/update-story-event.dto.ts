@@ -47,6 +47,14 @@ export class UpdateStoryEventDto {
   rewardConfig?: any;
 
   @IsOptional()
+  @IsObject()
+  requirements?: any;
+
+  @IsOptional()
+  @IsObject()
+  scoringWeights?: any;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 }
