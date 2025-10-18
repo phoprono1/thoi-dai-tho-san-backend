@@ -6,6 +6,7 @@ import { WorldBossModule } from '../world-boss/world-boss.module';
 import { SkillDefinitionModule } from '../player-skills/skill-definition.module';
 import { PetsModule } from '../pets/pets.module';
 import { UploadsController } from './uploads.controller';
+import { CasinoModule } from '../casino/casino.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { UploadsController } from './uploads.controller';
     WorldBossModule,
     SkillDefinitionModule,
     PetsModule,
+    CasinoModule,
   ],
   controllers: [UploadsController],
 })

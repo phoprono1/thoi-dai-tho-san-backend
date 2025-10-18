@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AdminController } from './admin.controller';
 import { AdminResourcesController } from './admin-resources.controller';
 import { AdminSecurityController } from './admin-security.controller';
+import { AdminCasinoController } from './admin-casino.controller';
 import { AdminService } from './admin.service';
 import { UserStatsModule } from '../user-stats/user-stats.module';
 import { UsersModule } from '../users/users.module';
@@ -14,12 +15,14 @@ import { Dungeon } from '../dungeons/dungeon.entity';
 import { Quest } from '../quests/quest.entity';
 import { Item } from '../items/item.entity';
 import { CharacterClassHistory } from '../character-classes/character-class-history.entity';
+import { ScratchCardModule } from '../casino/scratch-card/scratch-card.module';
 
 @Module({
   imports: [
     UserStatsModule,
     UsersModule,
     CommonModule,
+    ScratchCardModule,
     TypeOrmModule.forFeature([
       User,
       UserStat,
@@ -33,6 +36,7 @@ import { CharacterClassHistory } from '../character-classes/character-class-hist
     AdminController,
     AdminResourcesController,
     AdminSecurityController,
+    AdminCasinoController,
   ],
   providers: [AdminService],
   exports: [AdminService],

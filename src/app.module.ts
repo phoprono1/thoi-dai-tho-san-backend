@@ -47,6 +47,7 @@ import { SkillModule } from './player-skills/skill.module';
 import { GachaModule } from './gacha/gacha.module';
 import { WildAreaModule } from './wildarea/wildarea.module';
 import { PetsModule } from './pets/pets.module';
+import { CasinoModule } from './casino/casino.module';
 
 // ServeStatic DynamicModule instance for serving backend/assets at /assets
 // Narrow ts-ignore to the known interop call only
@@ -150,6 +151,7 @@ const ServeStaticDynamic: DynamicModule =
     UserAttributesModule,
     SkillModule,
     PetsModule,
+    CasinoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

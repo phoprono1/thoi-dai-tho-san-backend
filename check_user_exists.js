@@ -1,0 +1,2 @@
+const { createConnection } = require('typeorm'); const config = { type: 'postgres', host: 'localhost', port: 5432, username: 'postgres', password: 'hoangpho', database: 'thoi_dai_tho_san_v2' }; createConnection(config).then(conn => { console.log('Connected'); conn.query('SELECT COUNT(*) as count FROM \
+user\ WHERE id = 4;').then(rows => { console.log('User 4 exists:', rows[0].count > 0); conn.close(); process.exit(0); }); }).catch(err => { console.error('Query error:', err.message); process.exit(1); });

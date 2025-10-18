@@ -20,6 +20,7 @@ import { ItemsService } from '../items/items.service';
 import { WorldBossService } from '../world-boss/world-boss.service';
 import { SkillDefinitionService } from '../player-skills/skill-definition.service';
 import { PetService } from '../pets/pet.service';
+import { ScratchCardService } from '../casino/scratch-card/scratch-card.service';
 import { extname, join } from 'path';
 import * as fs from 'fs';
 import { parse } from 'path';
@@ -47,6 +48,7 @@ export class UploadsController {
     private worldBossService: WorldBossService,
     private skillDefinitionService: SkillDefinitionService,
     private petService: PetService,
+    private scratchCardService: ScratchCardService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -1175,6 +1177,174 @@ export class UploadsController {
         error: String(err),
         file: String(file?.filename),
       });
+      return { path: rel };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('casino/scratch-cards/:id')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      fileFilter: imageFileFilter,
+      limits: { fileSize: MAX_FILE_BYTES },
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const casinoDir = join(
+            process.cwd(),
+            'assets',
+            'casino',
+            'scratch-cards',
+          );
+          if (!fs.existsSync(casinoDir)) {
+            fs.mkdirSync(casinoDir, { recursive: true });
+          }
+          cb(null, casinoDir);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = randomUUID();
+          const ext = extname(file.originalname);
+          cb(null, `${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadScratchCardImage(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const rel = `/assets/casino/scratch-cards/${file.filename}`;
+    const originalPath = file.path;
+
+    try {
+      // For scratch card backgrounds (landscape images), we'll resize to fit within 800x600
+      // while maintaining aspect ratio, without cropping
+      const sharpModule = await import('sharp');
+      const sharpLibAny: any = (sharpModule &&
+        (sharpModule.default ?? sharpModule)) as any;
+
+      if (typeof sharpLibAny !== 'function') {
+        console.warn(
+          'Sharp import did not return a callable function for scratch card upload',
+        );
+        // Update card type even if thumbnail generation fails
+        await this.scratchCardService.updateCardTypeBackgroundImage(+id, rel);
+        return { path: rel };
+      }
+
+      const sharpInstance = sharpLibAny;
+      const ext = String(file && file.filename).toLowerCase();
+      const avifSupported = Boolean(
+        (sharpInstance.format &&
+          sharpInstance.format.avif &&
+          sharpInstance.format.avif.input) ||
+          (sharpInstance.format &&
+            sharpInstance.format.heif &&
+            sharpInstance.format.heif.input),
+      );
+
+      if (ext.endsWith('.avif') && !avifSupported) {
+        console.warn(
+          'AVIF upload detected for scratch card but AVIF input not supported by sharp build',
+          { file: originalPath },
+        );
+        await this.scratchCardService.updateCardTypeBackgroundImage(+id, rel);
+        return {
+          path: rel,
+          warning: 'AVIF not supported by server; image not optimized',
+        };
+      }
+
+      // Get image metadata to check if it's landscape
+      const metadata = await sharpInstance(originalPath).metadata();
+      const isLandscape = metadata.width > metadata.height;
+
+      let finalPath = originalPath;
+      let finalRel = rel;
+
+      if (isLandscape) {
+        // For landscape images, resize to fit within 800px width, maintain aspect ratio
+        const webpFilename = file.filename.replace(
+          extname(file.filename),
+          '.webp',
+        );
+        const webpPath = join(
+          process.cwd(),
+          'assets',
+          'casino',
+          'scratch-cards',
+          webpFilename,
+        );
+        finalPath = webpPath;
+        finalRel = `/assets/casino/scratch-cards/${webpFilename}`;
+
+        await sharpInstance(originalPath)
+          .resize(800, null, {
+            fit: 'inside',
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 85 })
+          .toFile(webpPath);
+
+        // Remove original file
+        fs.unlinkSync(originalPath);
+      } else {
+        // For portrait/square images, resize to fit within 600px height
+        const webpFilename = file.filename.replace(
+          extname(file.filename),
+          '.webp',
+        );
+        const webpPath = join(
+          process.cwd(),
+          'assets',
+          'casino',
+          'scratch-cards',
+          webpFilename,
+        );
+        finalPath = webpPath;
+        finalRel = `/assets/casino/scratch-cards/${webpFilename}`;
+
+        await sharpInstance(originalPath)
+          .resize(null, 600, {
+            fit: 'inside',
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 85 })
+          .toFile(webpPath);
+
+        // Remove original file
+        fs.unlinkSync(originalPath);
+      }
+
+      // Update card type with final image path
+      await this.scratchCardService.updateCardTypeBackgroundImage(
+        +id,
+        finalRel,
+      );
+
+      return {
+        path: finalRel,
+        note: isLandscape
+          ? 'Landscape image optimized for scratch cards'
+          : 'Portrait/square image optimized for scratch cards',
+      };
+    } catch (err) {
+      console.warn('Image optimization failed for scratch card:', {
+        error: String(err),
+        file: String(file?.filename),
+      });
+      // Still update card type with original image
+      try {
+        await this.scratchCardService.updateCardTypeBackgroundImage(+id, rel);
+      } catch (updateErr) {
+        console.warn('Failed to update scratch card type:', {
+          id,
+          error: String(updateErr),
+        });
+      }
       return { path: rel };
     }
   }

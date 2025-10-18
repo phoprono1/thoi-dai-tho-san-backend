@@ -675,7 +675,7 @@ export class MarketService {
     return { expired: toExpire.length };
   }
 
-    // Admin helpers: list listings
+  // Admin helpers: list listings
   async listListings() {
     const listings = await this.listingRepo.find({
       order: { createdAt: 'DESC' },
