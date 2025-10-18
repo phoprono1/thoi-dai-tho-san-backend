@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { ShopItem } from './shop-item.entity';
 import { MarketListing } from './market-listing.entity';
 import { MarketOffer } from './market-offer.entity';
@@ -47,10 +47,35 @@ export class MarketService {
 
   // Player-facing: list only active shop items
   async listPublicShopItems() {
-    return this.shopItemRepo.find({
+    const shopItems = await this.shopItemRepo.find({
       where: { active: true },
       order: { createdAt: 'DESC' },
     });
+
+    // Fetch item details for each shop item
+    const itemIds = shopItems.map((item) => item.itemId);
+    const items = await this.dataSource
+      .getRepository(Item)
+      .find({ where: { id: In(itemIds) } });
+
+    const itemMap = new Map(items.map((item) => [item.id, item]));
+
+    return shopItems.map((shopItem) => ({
+      id: shopItem.id,
+      itemId: shopItem.itemId,
+      price: shopItem.price,
+      quantity: shopItem.quantity,
+      active: shopItem.active,
+      createdAt: shopItem.createdAt,
+      item: itemMap.get(shopItem.itemId)
+        ? {
+            name: itemMap.get(shopItem.itemId).name,
+            imageUrl: itemMap.get(shopItem.itemId).image,
+            rarity: itemMap.get(shopItem.itemId).rarity,
+            type: itemMap.get(shopItem.itemId).type,
+          }
+        : null,
+    }));
   }
 
   // List shop items (for admin UI)
@@ -650,9 +675,37 @@ export class MarketService {
     return { expired: toExpire.length };
   }
 
-  // Admin helpers: list listings
+    // Admin helpers: list listings
   async listListings() {
-    return this.listingRepo.find({ order: { createdAt: 'DESC' } });
+    const listings = await this.listingRepo.find({
+      order: { createdAt: 'DESC' },
+    });
+
+    // Fetch item details for each listing
+    const itemIds = listings.map((listing) => listing.itemId);
+    const items = await this.dataSource
+      .getRepository(Item)
+      .find({ where: { id: In(itemIds) } });
+
+    const itemMap = new Map(items.map((item) => [item.id, item]));
+
+    return listings.map((listing) => ({
+      id: listing.id,
+      sellerId: listing.sellerId,
+      itemId: listing.itemId,
+      price: listing.price,
+      quantity: listing.quantity,
+      active: listing.active,
+      createdAt: listing.createdAt,
+      item: itemMap.get(listing.itemId)
+        ? {
+            name: itemMap.get(listing.itemId).name,
+            imageUrl: itemMap.get(listing.itemId).image,
+            rarity: itemMap.get(listing.itemId).rarity,
+            type: itemMap.get(listing.itemId).type,
+          }
+        : null,
+    }));
   }
 
   // Admin: list offers
