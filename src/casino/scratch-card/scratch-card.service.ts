@@ -125,8 +125,8 @@ export class ScratchCardService {
       // Generate position numbers for each grid position (10% chance to match player number or random 1-100)
       const positionNumbers: number[] = [];
       for (let i = 0; i < totalPositions; i++) {
-        // 10% chance to match player's lucky number, 90% chance to be random 1-100
-        const shouldMatch = Math.random() < 0.1;
+        // 30% chance to match player's lucky number, 70% chance to be random 1-100
+        const shouldMatch = Math.random() < 0.3; // 30% chance to match
         if (shouldMatch) {
           positionNumbers.push(playerNumber); // Match player's lucky number
         } else {

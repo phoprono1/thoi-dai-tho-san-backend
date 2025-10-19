@@ -1,6 +1,6 @@
 import { UserStat } from '../user-stats/user-stat.entity';
 import { UserItem } from '../user-items/user-item.entity';
-import { deriveCombatStats } from '../combat-engine/stat-converter';
+import { deriveCombatStats, CONFIG } from '../combat-engine/stat-converter';
 
 export type ComputeOptions = {
   exponent?: number; // p
@@ -49,6 +49,7 @@ export function computeCombatPowerFromStats(
     hp: 0.1, // Slightly higher weight for HP
     defense: 1.5, // Lower weight for defense to balance
     misc: 0.8, // Higher weight for crit/luck
+    mana: 0.1, // Weight for mana
     ...(opts.weights || {}),
   };
 
@@ -140,6 +141,10 @@ export function computeCombatPowerFromStats(
     baseDefense + equipDefFlat + coeffs.defFromVIT * eff(VIT), // VIT contributes to defense
   );
 
+  // Mana formula: baseMana + mana_from_INT * effective(INT)
+  const i = eff(INT);
+  const finalMana = Math.floor(CONFIG.baseMana + CONFIG.mana_from_INT * i);
+
   // Misc score from LUK (crit rate), INT (mana/crit damage), and DEX (dodge/combo)
   const misc = LUK * 1.0 + INT * 0.5 + DEX * 0.3;
 
@@ -147,7 +152,8 @@ export function computeCombatPowerFromStats(
     weights.attack * finalAttack +
     weights.hp * finalMaxHp +
     weights.defense * finalDefense +
-    weights.misc * misc;
+    weights.misc * misc +
+    weights.mana * finalMana;
 
-  return Math.max(0, Math.floor(power));
+  return Math.max(0, Math.floor(power * 20));
 }
