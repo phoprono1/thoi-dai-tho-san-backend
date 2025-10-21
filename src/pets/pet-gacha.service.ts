@@ -599,7 +599,9 @@ export class PetGachaService {
         }
       }
 
-      // After ticket consumption, if there are remaining pulls to pay with gold, deduct here
+      // After ticket consumption, if there are remaining pulls to pay with gold, deduct here.
+      // Track whether we already deducted gold so we don't double-deduct later.
+      let goldDeducted = false;
       const pullsCoveredByTickets = Math.floor(
         (ticketsConsumed || 0) / (banner.costItemQuantity || 1),
       );
@@ -614,6 +616,7 @@ export class PetGachaService {
         }
         txUser.gold -= goldNeeded;
         await manager.getRepository(User).save(txUser);
+        goldDeducted = true;
       }
 
       // Load or create pity row within transaction to avoid races
@@ -652,7 +655,10 @@ export class PetGachaService {
       }
 
       // Deduct cost within transaction if gold-based
+      // If we didn't already deduct gold above (e.g. no ticket logic ran), and
+      // the banner is not ticket-only, deduct the total cost once here.
       if (
+        !goldDeducted &&
         !(
           banner.usesItemCost() ||
           (banner.costPerPull === 0 && banner.costItemId)
